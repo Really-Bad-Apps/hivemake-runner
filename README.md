@@ -50,7 +50,7 @@ back to paid API keys on its own.
 ## Install the host runner
 
 ```bash
-git clone https://github.com/reallybadapps/hivemake-runner.git
+git clone https://github.com/Really-Bad-Apps/hivemake-runner.git
 cd hivemake-runner
 python3 -m venv .
 source bin/activate
@@ -228,7 +228,7 @@ updates can change capabilities and should repeat both harness smoke tests.
 ## Build and publish
 
 ```bash
-export RUNNER_IMAGE_REPOSITORY=ghcr.io/reallybadapps/hivemake-runner
+export RUNNER_IMAGE_REPOSITORY=ghcr.io/really-bad-apps/hivemake-runner
 ./build-publish.sh
 ```
 
