@@ -12,6 +12,7 @@ Group=runner
 WorkingDirectory=/opt/hivemake-runner
 Environment=HOME=/home/runner
 Environment=PATH=/opt/hivemake-runner/adapters/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/hivemake-runner/runner.env
 ExecStart=/opt/hivemake-runner/bin/python -m runner.daemon --config /opt/hivemake-runner/runner.yaml
 RuntimeDirectory=hivemake-runner
 RuntimeDirectoryMode=0700

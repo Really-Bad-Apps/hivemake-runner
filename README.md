@@ -1,300 +1,186 @@
 # HiveMake Runner
 
-Run project agents through a small REST API using the Python
-[Agent Client Protocol SDK](https://github.com/agentclientprotocol/python-sdk).
-Each project selects Claude or Codex in an `agent.yaml` marker. A host daemon
-owns fresh conversations; a Flask container exposes their sessions and results.
-The API can share the runner host or connect from a separate tailnet host.
-
-This is a trusted-network prototype. It has **no REST authentication** and
-automatically approves ACP permission requests. Access to its API grants the
-ability to run agents with the host service account's permissions. Keep the API
-on a trusted Docker network, loopback, or an explicitly selected tailnet address.
-
-## Architecture
+A host daemon that runs Codex and Claude through the Python Agent Client Protocol
+SDK. Deploy it on machines containing your projects and provider logins.
+The REST gateway lives in **HiveMake server**; this repository contains no Flask
+API container or Docker image build.
 
 ```text
-REST caller → Flask / Gunicorn container → Unix socket or Tailscale HTTP → host daemon
-                                                          ├─ Claude ACP adapter
-                                                          ├─ Codex ACP adapter
-                                                          └─ SQLite run results
+Client → HiveMake API → Tailscale HTTP → runner daemon → Codex / Claude
+                         ↑
+             Owner-key registration + heartbeat
 ```
 
-- Agents and their commands execute directly on the host, using its installed
-  development tools, workspace files, provider logins, and harness configuration.
-- In local mode, the API container mounts only the socket directory. In remote
-  mode, it mounts nothing and connects to the host runner over Tailscale. It needs no project files,
-  provider credentials, host home directory, or Docker socket.
-- Sessions belong to the daemon and are created fresh. Existing terminal
-  conversations are not attached or resumed.
-- Only one run per agent can be active, including across different sessions.
-  A second submission receives `409 agent_busy`; nothing is queued.
-- Restarting Flask leaves host runs alone. Restarting the daemon expires sessions,
-  retains run results, and marks unfinished runs `interrupted`.
-- Cancellation invalidates the session and stops its adapter process group. The
-  systemd unit also kills the daemon's cgroup at shutdown. Processes deliberately
-  detached into another process group are not individually tracked by this prototype.
+## Install
 
-## Requirements
-
-Linux, Python 3.12+, Node.js 22+, and Docker Compose for the API deployment.
-Use an existing host account authenticated with both desired harnesses. Install
-development tools needed by your projects on that host and ensure they appear in
-the daemon's `PATH` (systemd does not source your interactive shell startup files).
-
-The API and host use only public dependencies. Neither requires another HiveMake
-repository, a HiveMake token, an API key, or a private package registry. Provider
-authentication is still required by the agent runtime; existing subscription
-logins are expected to be available to the service account. Login renewal remains
-an operator task. The runner does not launch an interactive login flow or fall
-back to paid API keys on its own.
-
-## Install the host runner
+Linux, Python 3.12+, Node.js 22+, and an account already authenticated with the
+agent providers are required. Agents run directly on that host as that account.
 
 ```bash
 git clone https://github.com/Really-Bad-Apps/hivemake-runner.git
 cd hivemake-runner
 python3 -m venv .
 source bin/activate
-pip install -r host-requirements.txt
+pip install -r requirements.txt
 npm ci --prefix adapters --ignore-scripts
 cp examples/runner.yaml runner.yaml
 ```
 
-Edit `runner.yaml`: configure absolute discovery roots, the socket path, the
-private state directory, and absolute paths to the installed adapter executables.
-The examples use generic paths; they are not an existing deployment.
+Edit `runner.yaml` with absolute discovery roots, state/socket paths, adapter
+commands, the host's Tailscale IPv4 address, and your HiveMake origin. Give the
+host a readable `display_name`; when omitted it defaults to its hostname.
 
-For a manual local launch, choose writable socket/state directories, then run:
+Obtain an owner runner API key from your HiveMake installation. Store it in a
+private service environment file (`chmod 600`), outside the repository:
+
+```dotenv
+HIVEMAKE_OWNER_API_KEY=REPLACE_WITH_OWNER_KEY
+```
+
+Use `deploy/hivemake-runner.service` as a systemd template. Adjust `User`, `Group`,
+`HOME`, `PATH`, installation paths, and `EnvironmentFile` for your host. The
+service must use the account with the intended provider subscription logins.
+Systemd does not source interactive shell startup files.
+
+For a manual launch with the key already exported:
 
 ```bash
 python -m runner.daemon --config /absolute/path/to/runner.yaml
 ```
 
-For systemd, copy `deploy/hivemake-runner.service` to your system unit directory
-and edit its `User`, `Group`, `HOME`, `PATH`, installation paths, and configuration
-path. Use your authenticated host account, not root or an empty new account.
-The example's `RuntimeDirectory` and `StateDirectory` create owner-only
-`/run/hivemake-runner` and `/var/lib/hivemake-runner` directories.
+For a systemd installation:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now hivemake-runner
 ```
 
-The runner sets a restrictive umask and creates an owner-only Unix socket. The
-API must run with the same numeric UID to connect. Mount the **directory**, not
-the socket file, so replacing the socket on restart remains visible in Docker.
+The state directory stores `identity.json` (a generated UUID) and `runs.sqlite3`.
+Preserve it across upgrades and reinstalls to retain the runner identity and
+results. Renaming the display name does not change the ID. Do not clone a state
+directory onto another live host: independent hosts need independent IDs.
+Corrupt identity files cause startup failure rather than silent re-registration.
 
-## Register projects
+## Registration and availability
 
-Place this file at the root of a project within a configured discovery root:
-Use `examples/agent.example.yaml` as a template; its example filename is deliberately
-not discoverable until copied to a project's `agent.yaml`.
+The daemon registers immediately after its listener starts, then every 30 seconds
+with its ID, display name, endpoint and current project inventory. Registration
+uses `Authorization: Bearer <owner-key>` and is scoped to that owner. The key is
+removed from the environment before child agents start. Registration failures
+are retried without logging the key or response body. No redirects are followed.
+The HiveMake origin must use HTTPS or HTTP over a literal Tailscale IPv4 address.
+
+HiveMake marks a runner offline after 90 seconds without a successful heartbeat.
+New requests are rejected when offline or unreachable; there is no queue or
+automatic retry of work submissions. Existing local runs continue if HiveMake
+is unreachable. Revoking the registration key blocks registration and dispatch;
+replace the key and restart the service to rotate it.
+
+Omit `hivemake_url` only for standalone development without registration. The
+Unix socket remains available for local diagnostics. It is owner-only.
+
+## Discover projects
+
+Place an `agent.yaml` in a project under one of the configured discovery roots:
 
 ```yaml
-# agent.yaml
 version: 1
 id: example-developer
 name: Example Developer
 harness: codex  # or claude
 ```
 
-The directory containing the marker is the workspace. `id` is a stable lowercase
-identifier (letters, numbers, `_`, `-`, maximum 64 characters). `name` is optional.
-Existing project instructions and MCP settings remain the harness's responsibility;
-the runner does not rewrite or copy them. Verify their loading in your deployment
-smoke test because adapter behavior can differ from interactive CLI behavior.
+The marker's directory is the workspace. Discovery runs at daemon startup and
+on explicit refresh. It scans nested projects, skips dependency directories and
+virtual environments, and does not follow symlinks. Duplicate IDs on one host
+are excluded with discovery errors. Different runner hosts can use the same
+agent ID: API calls identify both the runner UUID and agent ID.
 
-Discovery runs at startup and on `POST /agents/refresh`. It scans nested projects,
-skips common dependency folders and virtual environments, and does not follow
-directory or marker symlinks. Overlapping roots are deduplicated. Duplicate IDs
-are excluded entirely, and invalid markers/unreadable roots appear in `errors`.
-After changing a definition, refresh and create a fresh session. An active run
-finishes with the definition it started with.
+`ready` means the adapter executable exists, not that provider login was verified.
+Project instructions and MCP configuration remain the harness's responsibility;
+verify their loading before using real projects. A workspace is a working
+directory, not an OS security boundary.
 
-`ready` means the configured adapter executable is available; it is not proof
-of valid provider authentication. Adapters start lazily on the first prompt.
+## Use through HiveMake
 
-## Run the API container
+Use your HiveMake origin and owner runner key (or a human login for dispatch).
+The server returns a key's secret only once, at creation.
 
 ```bash
-cp example.env .env
-# Edit RUNNER_UID, RUNNER_GID, RUNNER_SOCKET_DIR for the host daemon.
-docker compose --env-file .env -f docker-compose.example.yaml up -d --build
-```
+# List hosts; select a runner's generated id from the response.
+curl "$HIVEMAKE_URL/api/runners" -H "Authorization: Bearer $HIVEMAKE_OWNER_API_KEY"
 
-The default published address is `127.0.0.1:7183`. To expose on the tailnet, set
-`RUNNER_BIND_IP` to the host's tailnet address. For Docker-only access, remove the
-`ports` section and attach the container to your intended private Docker network.
-Do not bind this unauthenticated prototype to all host interfaces.
+curl "$HIVEMAKE_URL/api/runners/$RUNNER_ID/agents" \
+  -H "Authorization: Bearer $HIVEMAKE_OWNER_API_KEY"
 
-If your shell lacks the Docker supplementary group, use
-`sg docker -c 'docker compose --env-file .env -f docker-compose.example.yaml up -d --build'`.
-
-No Swagger UI or permissive browser CORS is enabled. Flask-smorest builds an
-OpenAPI definition internally. `GET /health` checks connectivity to the daemon
-and returns 503 if it is unavailable.
-
-## Split-host deployment over Tailscale
-
-Run the host daemon on the machine with your workspaces and subscription logins.
-Set these optional fields in its private `runner.yaml`:
-
-```yaml
-listen_host: 100.64.0.10  # Replace with the runner machine's Tailscale IPv4 address.
-listen_port: 7184
-```
-
-The daemon keeps its Unix socket and additionally listens on that specific
-address. Wildcard, LAN, and public IPv4 binds are rejected; loopback is accepted
-for local testing. There is no application authentication: tailnet access is the
-trust boundary, including access to the daemon control port. Tailscale encrypts
-the traffic between hosts; do not publish this listener through public routing.
-
-On the API host, use `docker-compose.remote.example.yaml` with these environment
-values in a private `.env` file:
-
-```dotenv
-RUNNER_IMAGE=ghcr.io/really-bad-apps/hivemake-runner@sha256:REPLACE_WITH_RELEASE_DIGEST
-RUNNER_URL=http://100.64.0.10:7184
-RUNNER_BIND_IP=100.64.0.11
-```
-
-Both example addresses are placeholders: use the runner host address for
-`RUNNER_URL` and the API host address for `RUNNER_BIND_IP`.
-
-```bash
-docker compose --env-file .env -f docker-compose.remote.example.yaml up -d --no-build
-```
-
-`RUNNER_URL` takes precedence over `RUNNER_SOCKET`. The gateway disables inherited
-HTTP proxy settings for this connection. Provider credentials and workspaces stay
-on the runner machine; the API host needs neither. A tailnet outage produces a
-503/504 response, and submissions are never automatically retried.
-
-## REST workflow
-
-```bash
-curl http://127.0.0.1:7183/agents
-curl -X POST http://127.0.0.1:7183/sessions \
+curl -X POST "$HIVEMAKE_URL/api/runners/$RUNNER_ID/sessions" \
+  -H "Authorization: Bearer $HIVEMAKE_OWNER_API_KEY" \
   -H 'Content-Type: application/json' -d '{"agent_id":"example-developer"}'
-# Substitute the returned session ID:
-curl -X POST http://127.0.0.1:7183/sessions/SESSION_ID/runs \
-  -H 'Content-Type: application/json' -d '{"prompt":"Explain this project briefly."}'
-# Substitute the returned run ID:
-curl http://127.0.0.1:7183/runs/RUN_ID
+
+curl -X POST "$HIVEMAKE_URL/api/runners/$RUNNER_ID/sessions/$SESSION_ID/runs" \
+  -H "Authorization: Bearer $HIVEMAKE_OWNER_API_KEY" \
+  -H 'Content-Type: application/json' -d '{"prompt":"Explain this project."}'
+
+curl "$HIVEMAKE_URL/api/runners/$RUNNER_ID/runs/$RUN_ID" \
+  -H "Authorization: Bearer $HIVEMAKE_OWNER_API_KEY"
 ```
 
-| Endpoint | Behavior |
+All execution endpoints are under `/api/runners/{runner_id}`:
+
+| Method / suffix | Purpose |
 | --- | --- |
-| `GET /health` | API and daemon readiness |
-| `GET /agents` | Registry, adapter availability, busy flags, discovery errors |
-| `POST /agents/refresh` | Rescan configured roots |
-| `POST /sessions` | `{ "agent_id": "..." }`; returns 201 with session ID |
-| `GET /sessions/{id}` | Session status and current run |
-| `DELETE /sessions/{id}` | Close idle session; 409 if active |
-| `POST /sessions/{id}/runs` | `{ "prompt": "..." }`; 202 or 409 `agent_busy` |
-| `GET /runs/{id}` | Persisted status, text response, events, errors, stop reason |
-| `POST /runs/{id}/cancel` | Request cancellation; poll until terminal |
+| GET `/agents` | Current discovered projects, availability and errors |
+| POST `/agents/refresh` | Rescan local roots; next heartbeat updates registry inventory |
+| POST `/sessions` | Fresh conversation, body `{"agent_id":"..."}` |
+| GET `/sessions/{id}` | Session state and active run |
+| DELETE `/sessions/{id}` | Close idle session (409 if busy) |
+| POST `/sessions/{id}/runs` | Submit `{"prompt":"..."}`; returns 202 |
+| GET `/runs/{id}` | Status, response, events, errors and stop reason |
+| POST `/runs/{id}/cancel` | Cancel; poll until finished |
 
-Run states: `running`, `cancelling`, `completed`, `cancelled`, `failed`, and
-`interrupted`. A completed protocol turn is not a claim that the requested task
-succeeded; inspect the response and `stop_reason` (which can include refusal or
-token limits). Follow-up prompts use the same live session. Runs that fail,
-time out, or are cancelled expire that session. Close idle/expired sessions to
-release the session limit (32 by default).
+One run per agent may be active, across all sessions. Overlap returns
+`409 agent_busy`. Follow-ups use the same live session. Timeout, failure or
+cancellation expires the session. Close unused sessions to release capacity.
+A timeout submitting work can mean it was accepted: inspect the session's
+`active_run` before deciding to retry.
 
-SQLite stores an indexed run status separately from the transcript. On startup,
-only unfinished transcripts are read for interruption recovery. Existing
-prototype databases are upgraded transactionally on first open.
+Restarting HiveMake does not affect local work. Restarting the daemon expires
+sessions, retains results, and marks unfinished runs `interrupted`. SQLite uses
+WAL and FULL synchronous writes. Failed result writes remain in memory with
+`persistence_pending: true`; new submissions receive 503 until storage recovers.
+Pending in-memory results are not durable across crashes. No transcript retention
+policy is implemented; keep state files private.
 
-If a result write fails, the daemon retains the current result in memory and
-reports `persistence_pending: true` when it is read. Result reads, new submissions,
-and shutdown retry pending writes. New runs receive `503 storage_unavailable`
-until those writes succeed; a failed write does not leave an agent busy forever.
-A pending result is **not durable**: if the daemon exits before storage recovers,
-the last successfully saved snapshot is all that can be recovered.
+## Prototype trust boundary
 
-The default run timeout is 30 minutes, startup timeout 60 seconds, and cancellation
-grace 5 seconds. Prompts are limited to 65,536 characters. Results retain up to
-1,048,576 response characters and 1,000 events, with a 16,384-character serialized
-limit per event; `truncated` reports omitted data. Events contain structured ACP
-updates, while the response text is ordinary model output.
+**HiveMake → daemon has no application authentication for this testing phase.**
+Bind the daemon only to its Tailscale address and restrict tailnet access. Anyone
+who can reach its listener can execute agents as the service account. The owner
+key authenticates registration with HiveMake; it does not protect this listener.
+Tailscale encrypts inter-host traffic. Do not expose the listener publicly.
 
-There is no automatic retry or idempotency contract. A 504 from a submission can
-mean the runner accepted it before the response was lost. Check the session's
-`active_run` before retrying. Multiple agent IDs or nested workspaces are not a
-filesystem lock: operators must avoid directing separate agents at conflicting
-edits in the same files.
+ACP permission requests are automatically approved (`allow_once` preferred).
+Harness sandbox settings are not weakened. Future human approval through
+HiveMake escalation is not implemented. Provider subscription logins remain on
+the host; the runner does not initiate login or fall back to API-key billing.
+Prompts, responses and events can contain private data. Logs omit prompt content,
+adapter stderr and registration credentials. Keep credentials, state and local
+configuration out of Git.
 
-## Permissions and private data
-
-The prototype selects `allow_once` when offered, otherwise `allow_always`. It
-does not silently weaken harness sandbox settings. If no approval choice exists,
-the permission response is cancelled. No client-side terminal or filesystem
-capability is advertised: adapters use their own harness tools.
-
-The marker's workspace is a working directory, **not an OS security boundary**.
-Effective access is controlled by the host account and harness configuration.
-Future permission requests requiring human intervention should use HiveMake's
-escalation feature; it is deliberately not integrated in this prototype.
-
-Prompts, replies, and tool events are stored in `runs.sqlite3` under `state_dir`
-and may contain private code or secrets. No automatic retention policy exists
-yet. Keep the state directory private and out of Git/backups intended for public
-distribution. Runtime logs contain IDs/statuses, not prompts or adapter stderr.
-Provider errors return an error category/type rather than raw potentially secret
-messages. Consult the provider's local diagnostics for detailed authentication
-failures. The host inherits its service environment, so avoid injecting unused
-provider API keys when subscription login is intended.
-
-## Development and verification
+## Development
 
 ```bash
 source bin/activate
-pip install -r requirements.txt -r host-requirements.txt -r dev-requirements.txt
-ruff check runner blueprints hivemake_runner.py tests
+pip install -r requirements.txt -r dev-requirements.txt
+ruff check runner tests
 pytest
-docker build -t hivemake-runner:local .
 ```
 
-The tests drive an actual ACP subprocess over stdio without credentials or model
-usage, including permission approval, cancellation of stuck processes and their
-children, session continuity, restart recovery, discovery errors, and the complete
-Flask-to-Unix-socket path. They do not prove provider login, subscription access,
-instruction loading, or tool execution through a real Claude/Codex session.
+Tests exercise real ACP subprocesses using a deterministic fake agent, including
+permissions, cancellation, process cleanup, recovery, registration and identity.
+They do not prove provider authentication or project MCP configuration. Verify
+both real harnesses in disposable projects before directing production work.
 
-Before deploying for real work, create temporary marked projects for **both**
-harnesses and verify: a text response; a follow-up that recalls the first turn;
-a permitted file edit; MCP/instruction loading; cancellation; API restart during
-a run; daemon restart and interrupted status. Use disposable workspaces.
-
-Regenerate Python pins deliberately with `uv pip compile requirements.in -o
-requirements.txt` and the equivalent host command. Adapter versions are pinned
-in `adapters/package.json` and `package-lock.json`; install with `npm ci`. Adapter
-updates can change capabilities and should repeat both harness smoke tests.
-
-## Build and publish
-
-```bash
-export RUNNER_IMAGE_REPOSITORY=ghcr.io/really-bad-apps/hivemake-runner
-./build-publish.sh
-```
-
-The script increments a local ignored `VERSION` only after successful pushes,
-publishes numbered and `latest` tags, and prints repository digests. Registry
-authentication stays in the operator's Docker configuration. It is never passed
-into the build. Deploy pinned image digests when handing an image to a host.
-
-The Docker context is an allowlist containing only the API code and its public
-requirements. Local configuration, host state, adapters, virtual environments,
-credentials, and project workspaces are excluded from the image.
-
-## Deferred
-
-Queueing, Telegram and HiveMake callers, HiveMake permission escalation, REST
-authentication, conversation recovery, automatic login, result retention policy,
-and cross-agent workspace scheduling are outside this prototype.
-
-MIT licensed. See [LICENSE](LICENSE).
+The retired standalone Flask gateway remains in Git history at the prototype
+release. Retire its deployment only after migrating clients to HiveMake and
+verifying the new registration and dispatch path.

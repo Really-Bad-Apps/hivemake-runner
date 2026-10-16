@@ -10,7 +10,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: pip install -r requirements.txt -r host-requirements.txt -r dev-requirements.txt
-      - run: ruff check runner blueprints hivemake_runner.py tests
+      - run: pip install -r requirements.txt -r dev-requirements.txt
+      - run: ruff check runner tests
       - run: pytest
-      - run: docker build -t hivemake-runner:test .

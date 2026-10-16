@@ -7,12 +7,14 @@ import logging
 import os
 import signal
 import stat
+from contextlib import suppress
 from pathlib import Path
 
 from aiohttp import web
 
 from .config import Config
 from .manager import Manager, RunnerError
+from .registration import OWNER_KEY_ENV, heartbeat, identity
 from .store import Store
 
 
@@ -96,6 +98,10 @@ def create_control_app(manager):
 
 
 async def serve(config):
+    # Remove the registration credential before creating any ACP subprocesses.
+    owner_key = os.environ.pop(OWNER_KEY_ENV, "")
+    if config.hivemake_url and not owner_key.startswith("hm_owner_"):
+        raise ValueError("HIVEMAKE_OWNER_API_KEY is required for registration")
     os.umask(0o077)
     config.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     config.socket.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -110,6 +116,8 @@ async def serve(config):
             if not stat.S_ISSOCK(config.socket.lstat().st_mode):
                 raise ValueError("Refusing to replace a non-socket path")
             config.socket.unlink()
+        runner_id, display_name = identity(config.state_dir, config.display_name)
+        registration_task = None
         store = Store(config.state_dir / "runs.sqlite3")
         manager = Manager(config, store)
         server = web.AppRunner(create_control_app(manager), access_log=None)
@@ -123,9 +131,22 @@ async def serve(config):
             os.chmod(config.socket, 0o600)
             if config.listen_host is not None:
                 await web.TCPSite(server, config.listen_host, config.listen_port).start()
-            logging.getLogger(__name__).info("runner_ready agents=%d", len(manager.agents))
+            logging.getLogger(__name__).info(
+                "runner_ready runner_id=%s display_name=%s agents=%d",
+                runner_id,
+                display_name,
+                len(manager.agents),
+            )
+            if config.hivemake_url:
+                registration_task = asyncio.create_task(
+                    heartbeat(config, manager, runner_id, display_name, owner_key)
+                )
             await stop.wait()
         finally:
+            if registration_task:
+                registration_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await registration_task
             manager.stopping = True
             await server.cleanup()
             await manager.shutdown()

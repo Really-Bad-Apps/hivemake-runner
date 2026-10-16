@@ -1,7 +1,0 @@
-# Allowlist: never send host configuration, credentials, results, or venvs.
-**
-!Dockerfile
-!requirements.txt
-!hivemake_runner.py
-!blueprints/
-!blueprints/*.py

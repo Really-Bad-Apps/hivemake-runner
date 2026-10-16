@@ -54,7 +54,7 @@ async def test_process_lock_signal_cleanup_and_restart(config, tmp_path):
             assert await asyncio.wait_for(duplicate.wait(), 5) != 0
             assert (await client.get("/health")).status_code == 200
             sid = (await client.post("/sessions", json={"agent_id": "demo"})).json()["id"]
-            # The control plane validates input independently of Flask.
+            # The daemon validates input independently of the HiveMake gateway.
             for payload in ([], {"prompt": 1}, {"prompt": " "}, {"prompt": "x", "extra": 1}):
                 assert (await client.post(f"/sessions/{sid}/runs", json=payload)).status_code == 400
             run = (await client.post(f"/sessions/{sid}/runs", json={"prompt": "hang"})).json()

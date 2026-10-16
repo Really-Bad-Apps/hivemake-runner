@@ -50,7 +50,7 @@ class ACPSession:
         self.process = await asyncio.create_subprocess_exec(
             *self.command,
             cwd=self.agent.workspace,
-            env=os.environ.copy(),
+            env={k: v for k, v in os.environ.items() if k != "HIVEMAKE_OWNER_API_KEY"},
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

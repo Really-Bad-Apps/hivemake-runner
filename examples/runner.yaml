@@ -10,6 +10,9 @@ startup_timeout: 60
 run_timeout: 1800
 cancel_grace: 5
 max_sessions: 32
-# Optional split-host transport. Bind to the runner host's tailnet IPv4 address.
-# listen_host: 100.64.0.10
-# listen_port: 7184
+# This host's Tailscale IPv4, reachable from HiveMake.
+listen_host: 100.64.0.10
+listen_port: 7184
+hivemake_url: https://api.example.com
+display_name: Development host
+# Set HIVEMAKE_OWNER_API_KEY in the service environment, never in this YAML.

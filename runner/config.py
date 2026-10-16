@@ -4,6 +4,7 @@ import ipaddress
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -20,6 +21,8 @@ class Config:
     max_sessions: int = 32
     listen_host: str | None = None
     listen_port: int = 7184
+    hivemake_url: str | None = None
+    display_name: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -37,6 +40,8 @@ class Config:
             "max_sessions",
             "listen_host",
             "listen_port",
+            "hivemake_url",
+            "display_name",
         }
         if set(data) - allowed:
             raise ValueError("Unknown runner configuration fields")
@@ -81,7 +86,41 @@ class Config:
                 raise ValueError("listen_host must be a loopback or Tailscale IPv4 address")
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("listen_port must be an integer from 1 to 65535")
-        options.update(listen_host=host, listen_port=port)
+        name = data.get("display_name")
+        if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 200):
+            raise ValueError("display_name must contain 1–200 characters")
+        url = data.get("hivemake_url")
+        if url is not None:
+            if not isinstance(url, str):
+                raise ValueError("hivemake_url must be an origin")
+            parsed = urlsplit(url)
+            _ = parsed.port  # Validate malformed/out-of-range ports at startup.
+            # Send owner credentials only over HTTPS, or encrypted Tailscale.
+            private_http = False
+            try:
+                ip = ipaddress.ip_address(parsed.hostname or "")
+                private_http = ip.version == 4 and ip in ipaddress.ip_network("100.64.0.0/10")
+            except ValueError:
+                pass
+            if (
+                parsed.scheme not in ("https", "http")
+                or not parsed.hostname
+                or (parsed.scheme == "http" and not private_http)
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in ("", "/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("hivemake_url must be an HTTPS or Tailscale HTTP origin")
+            if host is None or ipaddress.ip_address(host) not in ipaddress.ip_network(
+                "100.64.0.0/10"
+            ):
+                raise ValueError("Registration requires a Tailscale IPv4 listen_host")
+            if port < 1024:
+                raise ValueError("Registration requires listen_port >= 1024")
+            url = url.rstrip("/")
+        options.update(listen_host=host, listen_port=port, hivemake_url=url, display_name=name)
         return cls(
             tuple(absolute(r) for r in roots),
             absolute(data.get("socket")),
