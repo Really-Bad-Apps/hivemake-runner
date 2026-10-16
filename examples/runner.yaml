@@ -1,0 +1,12 @@
+# Copy to runner.yaml (ignored by Git). Use absolute host paths throughout.
+roots:
+  - /srv/projects
+socket: /run/hivemake-runner/runner.sock
+state_dir: /var/lib/hivemake-runner
+commands:
+  codex: [/opt/hivemake-runner/adapters/node_modules/.bin/codex-acp]
+  claude: [/opt/hivemake-runner/adapters/node_modules/.bin/claude-agent-acp]
+startup_timeout: 60
+run_timeout: 1800
+cancel_grace: 5
+max_sessions: 32

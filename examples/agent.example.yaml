@@ -1,0 +1,4 @@
+version: 1
+id: example-developer
+name: Example Developer
+harness: codex

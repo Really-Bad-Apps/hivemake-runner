@@ -1,0 +1,27 @@
+# Install as a SYSTEM unit; edit User/Group/HOME/PATH and installation paths.
+# Use the account already authenticated with the desired agent providers.
+[Unit]
+Description=HiveMake Runner host agent service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=runner
+Group=runner
+WorkingDirectory=/opt/hivemake-runner
+Environment=HOME=/home/runner
+Environment=PATH=/opt/hivemake-runner/adapters/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/hivemake-runner/bin/python -m runner.daemon --config /opt/hivemake-runner/runner.yaml
+RuntimeDirectory=hivemake-runner
+RuntimeDirectoryMode=0700
+StateDirectory=hivemake-runner
+StateDirectoryMode=0700
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

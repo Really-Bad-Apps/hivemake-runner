@@ -1,0 +1,241 @@
+"""Single-event-loop owner of sessions, admission, and run state."""
+
+import asyncio
+import json
+import logging
+import shutil
+from contextlib import suppress
+from uuid import uuid4
+
+from .acp_session import ACPSession
+from .discovery import discover
+from .store import now
+
+log = logging.getLogger(__name__)
+MAX_OUTPUT = 1024 * 1024
+MAX_EVENTS = 1000
+
+
+class RunnerError(Exception):
+    def __init__(self, code, status=400):
+        self.code, self.status = code, status
+        super().__init__(code)
+
+
+class Manager:
+    def __init__(self, config, store, session_factory=ACPSession):
+        self.config, self.store, self.session_factory = config, store, session_factory
+        self.sessions, self.busy, self.tasks, self.cancel_tasks = {}, {}, {}, {}
+        self.runs = {}
+        self.stopping = False
+        self.refresh()
+
+    def refresh(self):
+        self.agents, self.discovery = discover(self.config.roots, self.config.commands)
+        return self.list_agents()
+
+    def list_agents(self):
+        return {
+            "agents": [{**a, "busy": a["id"] in self.busy} for a in self.discovery["agents"]],
+            "errors": self.discovery["errors"],
+        }
+
+    def new_session(self, agent_id):
+        if self.stopping:
+            raise RunnerError("runner_stopping", 503)
+        if agent_id not in self.agents:
+            raise RunnerError("agent_not_found", 404)
+        if len(self.sessions) >= self.config.max_sessions:
+            raise RunnerError("session_limit", 409)
+        agent = self.agents[agent_id]
+        command = self.config.commands.get(agent.harness)
+        if not command or not shutil.which(command[0]):
+            raise RunnerError("adapter_not_installed", 503)
+        session_id = str(uuid4())
+        self.sessions[session_id] = {
+            "id": session_id,
+            "agent": agent,
+            "created_at": now(),
+            "runtime": None,
+            "active_run": None,
+            "valid": True,
+        }
+        return self.get_session(session_id)
+
+    def _session(self, session_id):
+        session = self.sessions.get(session_id)
+        if session is None:
+            raise RunnerError("session_not_found", 404)
+        return session
+
+    def get_session(self, session_id):
+        s = self._session(session_id)
+        return {
+            "id": s["id"],
+            "agent_id": s["agent"].id,
+            "created_at": s["created_at"],
+            "active_run": s["active_run"],
+            "status": "open" if s["valid"] else "expired",
+        }
+
+    def submit(self, session_id, prompt):
+        if self.stopping:
+            raise RunnerError("runner_stopping", 503)
+        s = self._session(session_id)
+        agent = s["agent"]
+        if not s["valid"]:
+            raise RunnerError("session_expired", 409)
+        if self.agents.get(agent.id) != agent:
+            raise RunnerError("agent_configuration_changed", 409)
+        if agent.id in self.busy:
+            raise RunnerError("agent_busy", 409)
+        # No await between admission and reservation: concurrent requests cannot
+        # both start a run. Separate sessions still share the agent reservation.
+        run_id = str(uuid4())
+        run = {
+            "id": run_id,
+            "session_id": session_id,
+            "agent_id": agent.id,
+            "status": "running",
+            "created_at": now(),
+            "finished_at": None,
+            "prompt": prompt,
+            "response": "",
+            "events": [],
+            "truncated": False,
+            "stop_reason": None,
+            "error": None,
+        }
+        self.store.save(run)
+        self.busy[agent.id] = run_id
+        s["active_run"] = run_id
+        self.runs[run_id] = run
+        self.tasks[run_id] = asyncio.create_task(self._execute(s, run))
+        return dict(run)
+
+    def _emit(self, session, event):
+        run = self.runs.get(session["active_run"])
+        if run is None:
+            return
+        if event.get("sessionUpdate") == "agent_message_chunk":
+            content = event.get("content", {})
+            if content.get("type") == "text":
+                text = content.get("text", "")
+                available = MAX_OUTPUT - len(run["response"])
+                run["response"] += text[:available]
+                if len(text) > available:
+                    run["truncated"] = True
+        # Bound snapshots (including unusually large tool results).
+        if len(run["events"]) < MAX_EVENTS and len(json.dumps(event)) <= 16384:
+            run["events"].append(event)
+        else:
+            run["truncated"] = True
+        self.store.save(run)
+
+    async def _execute(self, session, run):
+        failed = False
+        try:
+            if run["status"] == "cancelling":
+                raise asyncio.CancelledError
+            if session["runtime"] is None:
+                agent = session["agent"]
+                session["runtime"] = self.session_factory(
+                    agent,
+                    self.config.commands[agent.harness],
+                    lambda event: self._emit(session, event),
+                    self.config.startup_timeout,
+                )
+            async with asyncio.timeout(self.config.run_timeout):
+                reason = await session["runtime"].prompt(run["prompt"])
+            run["stop_reason"] = reason
+            run["status"] = (
+                "cancelled"
+                if run["status"] == "cancelling" or reason == "cancelled"
+                else "completed"
+            )
+        except asyncio.CancelledError:
+            run["status"] = "interrupted" if self.stopping else "cancelled"
+            run["error"] = "runner_stopped" if self.stopping else None
+            failed = True
+        except TimeoutError:
+            run.update(status="failed", error="run_timeout")
+            failed = True
+        except Exception as exc:
+            # Do not leak provider errors containing local config or tokens.
+            run.update(status="failed", error="adapter_error", error_type=type(exc).__name__)
+            log.warning("adapter_error run_id=%s type=%s", run["id"], type(exc).__name__)
+            failed = True
+        finally:
+            if failed or run["status"] in ("cancelled", "interrupted"):
+                session["valid"] = False
+                if session["runtime"] is not None:
+                    with suppress(Exception):
+                        await session["runtime"].close()
+            # Release admission only after the process has stopped.
+            run["finished_at"] = now()
+            self.store.save(run)
+            self.busy.pop(session["agent"].id, None)
+            session["active_run"] = None
+            self.tasks.pop(run["id"], None)
+            self.runs.pop(run["id"], None)
+            log.info("run_finished run_id=%s status=%s", run["id"], run["status"])
+
+    def get_run(self, run_id):
+        run = self.store.get(run_id)
+        if run is None:
+            raise RunnerError("run_not_found", 404)
+        return run
+
+    def cancel(self, run_id):
+        run = self.get_run(run_id)
+        if run["status"] not in ("running", "cancelling"):
+            return run
+        current = self.runs[run_id]
+        current["status"] = "cancelling"
+        self.store.save(current)
+        if run_id not in self.cancel_tasks:
+            task = asyncio.create_task(self._cancel(run_id))
+            self.cancel_tasks[run_id] = task
+            task.add_done_callback(lambda _: self.cancel_tasks.pop(run_id, None))
+        return dict(current)
+
+    async def _cancel(self, run_id):
+        task = self.tasks.get(run_id)
+        if task is None:
+            return
+        session = self.sessions[self.runs[run_id]["session_id"]]
+        try:
+            async with asyncio.timeout(self.config.cancel_grace):
+                if session["runtime"] is not None:
+                    with suppress(Exception):
+                        await session["runtime"].cancel()
+                await asyncio.shield(task)
+        except TimeoutError:
+            # The adapter did not acknowledge cancellation. Kill its process
+            # group and invalidate the conversation, then release admission.
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def close_session(self, session_id):
+        s = self._session(session_id)
+        if s["active_run"] is not None:
+            raise RunnerError("session_busy", 409)
+        # Reserve before awaiting teardown to prevent a concurrent submit.
+        s["valid"] = False
+        if s["runtime"] is not None:
+            await s["runtime"].close()
+        self.sessions.pop(session_id, None)
+
+    async def shutdown(self):
+        self.stopping = True
+        for task in list(self.cancel_tasks.values()):
+            task.cancel()
+        await asyncio.gather(*list(self.cancel_tasks.values()), return_exceptions=True)
+        active = list(self.tasks.values())
+        for task in active:
+            task.cancel()
+        await asyncio.gather(*active, return_exceptions=True)
+        for s in self.sessions.values():
+            if s["runtime"] is not None:
+                await s["runtime"].close()
