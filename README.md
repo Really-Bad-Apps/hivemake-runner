@@ -166,6 +166,17 @@ token limits). Follow-up prompts use the same live session. Runs that fail,
 time out, or are cancelled expire that session. Close idle/expired sessions to
 release the session limit (32 by default).
 
+SQLite stores an indexed run status separately from the transcript. On startup,
+only unfinished transcripts are read for interruption recovery. Existing
+prototype databases are upgraded transactionally on first open.
+
+If a result write fails, the daemon retains the current result in memory and
+reports `persistence_pending: true` when it is read. Result reads, new submissions,
+and shutdown retry pending writes. New runs receive `503 storage_unavailable`
+until those writes succeed; a failed write does not leave an agent busy forever.
+A pending result is **not durable**: if the daemon exits before storage recovers,
+the last successfully saved snapshot is all that can be recovered.
+
 The default run timeout is 30 minutes, startup timeout 60 seconds, and cancellation
 grace 5 seconds. Prompts are limited to 65,536 characters. Results retain up to
 1,048,576 response characters and 1,000 events, with a 16,384-character serialized

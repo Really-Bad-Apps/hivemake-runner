@@ -42,6 +42,7 @@ class ACPSession:
         self.process = self.connection = self.session_id = None
         self.stderr_task = None
         self.closed = False
+        self._close_task = None
 
     async def start(self):
         # Inherit the host service user's login/config environment. Never copy it
@@ -93,7 +94,14 @@ class ACPSession:
     async def close(self):
         if self.closed:
             return
-        self.closed = True
+        if self._close_task is None or (
+            self._close_task.done()
+            and (self._close_task.cancelled() or self._close_task.exception())
+        ):
+            self._close_task = asyncio.create_task(self._close())
+        await asyncio.shield(self._close_task)
+
+    async def _close(self):
         if self.process is not None:
             # Include children even when the adapter parent already exited.
             with suppress(ProcessLookupError):
@@ -111,3 +119,5 @@ class ACPSession:
             self.stderr_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self.stderr_task
+
+        self.closed = True

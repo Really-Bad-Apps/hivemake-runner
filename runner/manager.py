@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import shutil
+import sqlite3
 from contextlib import suppress
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ class Manager:
         self.config, self.store, self.session_factory = config, store, session_factory
         self.sessions, self.busy, self.tasks, self.cancel_tasks = {}, {}, {}, {}
         self.runs = {}
+        self.pending_results = {}
         self.stopping = False
         self.refresh()
 
@@ -81,6 +83,8 @@ class Manager:
     def submit(self, session_id, prompt):
         if self.stopping:
             raise RunnerError("runner_stopping", 503)
+        if not self._flush_pending():
+            raise RunnerError("storage_unavailable", 503)
         s = self._session(session_id)
         agent = s["agent"]
         if not s["valid"]:
@@ -106,7 +110,10 @@ class Manager:
             "stop_reason": None,
             "error": None,
         }
-        self.store.save(run)
+        try:
+            self.store.save(run)
+        except sqlite3.Error:
+            raise RunnerError("storage_unavailable", 503) from None
         self.busy[agent.id] = run_id
         s["active_run"] = run_id
         self.runs[run_id] = run
@@ -130,7 +137,23 @@ class Manager:
             run["events"].append(event)
         else:
             run["truncated"] = True
-        self.store.save(run)
+        self._persist(run)
+
+    def _persist(self, run):
+        try:
+            self.store.save(run)
+        except sqlite3.Error:
+            self.pending_results[run["id"]] = run
+            log.error("result_persistence_pending run_id=%s", run["id"])
+            return False
+        self.pending_results.pop(run["id"], None)
+        return True
+
+    def _flush_pending(self):
+        for run in list(self.pending_results.values()):
+            if not self._persist(run):
+                return False
+        return True
 
     async def _execute(self, session, run):
         failed = False
@@ -166,33 +189,54 @@ class Manager:
             log.warning("adapter_error run_id=%s type=%s", run["id"], type(exc).__name__)
             failed = True
         finally:
-            if failed or run["status"] in ("cancelled", "interrupted"):
-                session["valid"] = False
-                if session["runtime"] is not None:
-                    with suppress(Exception):
-                        await session["runtime"].close()
-            # Release admission only after the process has stopped.
-            run["finished_at"] = now()
-            self.store.save(run)
-            self.busy.pop(session["agent"].id, None)
-            session["active_run"] = None
-            self.tasks.pop(run["id"], None)
-            self.runs.pop(run["id"], None)
-            log.info("run_finished run_id=%s status=%s", run["id"], run["status"])
+            # Own finalization independently: cancellation may stop prompt work,
+            # but must never interrupt process cleanup or admission release.
+            finalizer = asyncio.create_task(self._finalize(session, run, failed))
+            while not finalizer.done():
+                try:
+                    await asyncio.shield(finalizer)
+                except asyncio.CancelledError:
+                    continue
+            await finalizer
+
+    async def _finalize(self, session, run, failed):
+        if failed or run["status"] in ("cancelled", "interrupted"):
+            session["valid"] = False
+            if session["runtime"] is not None:
+                await session["runtime"].close()
+        # Keep an unpersisted result available in memory, and reject further
+        # work while storage is unavailable instead of accumulating results.
+        run["finished_at"] = now()
+        self._persist(run)
+        self.busy.pop(session["agent"].id, None)
+        session["active_run"] = None
+        self.tasks.pop(run["id"], None)
+        self.runs.pop(run["id"], None)
+        log.info("run_finished run_id=%s status=%s", run["id"], run["status"])
 
     def get_run(self, run_id):
-        run = self.store.get(run_id)
+        if run_id in self.pending_results:
+            run = self.pending_results[run_id]
+            persisted = self._persist(run)
+            return {**run, "persistence_pending": not persisted}
+        try:
+            run = self.store.get(run_id)
+        except sqlite3.Error:
+            raise RunnerError("storage_unavailable", 503) from None
         if run is None:
             raise RunnerError("run_not_found", 404)
         return run
 
     def cancel(self, run_id):
-        run = self.get_run(run_id)
-        if run["status"] not in ("running", "cancelling"):
-            return run
-        current = self.runs[run_id]
+        # In-memory state is authoritative while a task is finishing. The
+        # persisted copy can still say "cancelling" during process cleanup.
+        current = self.runs.get(run_id)
+        if current is None:
+            return self.get_run(run_id)
+        if current["status"] not in ("running", "cancelling"):
+            return dict(current)
         current["status"] = "cancelling"
-        self.store.save(current)
+        self._persist(current)
         if run_id not in self.cancel_tasks:
             task = asyncio.create_task(self._cancel(run_id))
             self.cancel_tasks[run_id] = task
@@ -215,7 +259,7 @@ class Manager:
             # group and invalidate the conversation, then release admission.
             task.cancel()
             with suppress(asyncio.CancelledError):
-                await task
+                await asyncio.shield(task)
 
     async def close_session(self, session_id):
         s = self._session(session_id)
@@ -232,6 +276,9 @@ class Manager:
         for task in list(self.cancel_tasks.values()):
             task.cancel()
         await asyncio.gather(*list(self.cancel_tasks.values()), return_exceptions=True)
+        # Let newly submitted execution tasks enter their try/finally before
+        # cancelling them; a task cancelled before its first step never runs it.
+        await asyncio.sleep(0)
         active = list(self.tasks.values())
         for task in active:
             task.cancel()
@@ -239,3 +286,5 @@ class Manager:
         for s in self.sessions.values():
             if s["runtime"] is not None:
                 await s["runtime"].close()
+
+        self._flush_pending()
