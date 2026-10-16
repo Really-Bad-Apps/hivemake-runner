@@ -4,6 +4,7 @@ Run project agents through a small REST API using the Python
 [Agent Client Protocol SDK](https://github.com/agentclientprotocol/python-sdk).
 Each project selects Claude or Codex in an `agent.yaml` marker. A host daemon
 owns fresh conversations; a Flask container exposes their sessions and results.
+The API can share the runner host or connect from a separate tailnet host.
 
 This is a trusted-network prototype. It has **no REST authentication** and
 automatically approves ACP permission requests. Access to its API grants the
@@ -13,7 +14,7 @@ on a trusted Docker network, loopback, or an explicitly selected tailnet address
 ## Architecture
 
 ```text
-REST caller → Flask / Gunicorn container → Unix socket → Python host daemon
+REST caller → Flask / Gunicorn container → Unix socket or Tailscale HTTP → host daemon
                                                           ├─ Claude ACP adapter
                                                           ├─ Codex ACP adapter
                                                           └─ SQLite run results
@@ -21,7 +22,8 @@ REST caller → Flask / Gunicorn container → Unix socket → Python host daemo
 
 - Agents and their commands execute directly on the host, using its installed
   development tools, workspace files, provider logins, and harness configuration.
-- The API container mounts only the socket directory. It needs no project files,
+- In local mode, the API container mounts only the socket directory. In remote
+  mode, it mounts nothing and connects to the host runner over Tailscale. It needs no project files,
   provider credentials, host home directory, or Docker socket.
 - Sessions belong to the daemon and are created fresh. Existing terminal
   conversations are not attached or resumed.
@@ -133,6 +135,43 @@ If your shell lacks the Docker supplementary group, use
 No Swagger UI or permissive browser CORS is enabled. Flask-smorest builds an
 OpenAPI definition internally. `GET /health` checks connectivity to the daemon
 and returns 503 if it is unavailable.
+
+## Split-host deployment over Tailscale
+
+Run the host daemon on the machine with your workspaces and subscription logins.
+Set these optional fields in its private `runner.yaml`:
+
+```yaml
+listen_host: 100.64.0.10  # Replace with the runner machine's Tailscale IPv4 address.
+listen_port: 7184
+```
+
+The daemon keeps its Unix socket and additionally listens on that specific
+address. Wildcard, LAN, and public IPv4 binds are rejected; loopback is accepted
+for local testing. There is no application authentication: tailnet access is the
+trust boundary, including access to the daemon control port. Tailscale encrypts
+the traffic between hosts; do not publish this listener through public routing.
+
+On the API host, use `docker-compose.remote.example.yaml` with these environment
+values in a private `.env` file:
+
+```dotenv
+RUNNER_IMAGE=ghcr.io/really-bad-apps/hivemake-runner@sha256:REPLACE_WITH_RELEASE_DIGEST
+RUNNER_URL=http://100.64.0.10:7184
+RUNNER_BIND_IP=100.64.0.11
+```
+
+Both example addresses are placeholders: use the runner host address for
+`RUNNER_URL` and the API host address for `RUNNER_BIND_IP`.
+
+```bash
+docker compose --env-file .env -f docker-compose.remote.example.yaml up -d --no-build
+```
+
+`RUNNER_URL` takes precedence over `RUNNER_SOCKET`. The gateway disables inherited
+HTTP proxy settings for this connection. Provider credentials and workspaces stay
+on the runner machine; the API host needs neither. A tailnet outage produces a
+503/504 response, and submissions are never automatically retried.
 
 ## REST workflow
 

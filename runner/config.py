@@ -1,5 +1,6 @@
 """Explicit local configuration; no credentials or infrastructure defaults."""
 
+import ipaddress
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ class Config:
     run_timeout: float = 1800
     cancel_grace: float = 5
     max_sessions: int = 32
+    listen_host: str | None = None
+    listen_port: int = 7184
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -32,6 +35,8 @@ class Config:
             "run_timeout",
             "cancel_grace",
             "max_sessions",
+            "listen_host",
+            "listen_port",
         }
         if set(data) - allowed:
             raise ValueError("Unknown runner configuration fields")
@@ -68,6 +73,15 @@ class Config:
                 if name == "max_sessions" and not isinstance(v, int):
                     raise ValueError("max_sessions must be an integer")
                 options[name] = v
+        host = data.get("listen_host")
+        port = data.get("listen_port", 7184)
+        if host is not None:
+            address = ipaddress.ip_address(host)
+            if not (address.is_loopback or address in ipaddress.ip_network("100.64.0.0/10")):
+                raise ValueError("listen_host must be a loopback or Tailscale IPv4 address")
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError("listen_port must be an integer from 1 to 65535")
+        options.update(listen_host=host, listen_port=port)
         return cls(
             tuple(absolute(r) for r in roots),
             absolute(data.get("socket")),

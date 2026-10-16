@@ -1,4 +1,4 @@
-"""Host daemon. Serves its private HTTP control plane on a Unix socket only."""
+"""Host daemon with a Unix socket and optional private-network listener."""
 
 import argparse
 import asyncio
@@ -121,6 +121,8 @@ async def serve(config):
             await server.setup()
             await web.UnixSite(server, str(config.socket)).start()
             os.chmod(config.socket, 0o600)
+            if config.listen_host is not None:
+                await web.TCPSite(server, config.listen_host, config.listen_port).start()
             logging.getLogger(__name__).info("runner_ready agents=%d", len(manager.agents))
             await stop.wait()
         finally:

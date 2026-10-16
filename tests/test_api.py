@@ -64,3 +64,47 @@ def test_unavailable_runner_returns_503(tmp_path):
     response = client.get("/health")
     assert response.status_code == 503
     assert response.json == {"error": "runner_unavailable"}
+
+
+async def test_api_to_tcp_runner(manager, monkeypatch):
+    server = web.AppRunner(create_control_app(manager))
+    await server.setup()
+    site = web.TCPSite(server, "127.0.0.1", 0)
+    await site.start()
+    port = server.addresses[0][1]
+    monkeypatch.setenv("RUNNER_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+    app = create_app()
+
+    def call():
+        with app.test_client() as client:
+            assert client.get("/health").status_code == 200
+            session = client.post("/sessions", json={"agent_id": "demo"})
+            assert session.status_code == 201
+            response = client.post(f"/sessions/{session.json['id']}/runs", json={"prompt": "hello"})
+            assert response.status_code == 202
+            return response.json["id"]
+
+    try:
+        rid = await asyncio.to_thread(call)
+        async with asyncio.timeout(5):
+            while rid in manager.tasks:
+                await asyncio.sleep(0.02)
+        assert manager.get_run(rid)["response"] == "turn 1: hello"
+    finally:
+        await server.cleanup()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.test",
+        "http://user:password@example.test",
+        "http://example.test/path",
+        "http://example.test?token=secret",
+    ],
+)
+def test_remote_origin_validation(url):
+    with pytest.raises(ValueError):
+        RunnerClient(url=url)

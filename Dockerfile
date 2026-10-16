@@ -1,4 +1,6 @@
 FROM python:3.13-slim
+LABEL org.opencontainers.image.source="https://github.com/Really-Bad-Apps/hivemake-runner" \
+      org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app
 COPY requirements.txt .

@@ -163,3 +163,15 @@ def test_config_validation(tmp_path):
     )
     with pytest.raises(ValueError):
         Config.load(path)
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "8.8.8.8", "192.168.1.2"])
+def test_reject_public_or_wildcard_control_listener(tmp_path, host):
+    from runner.config import Config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        f'roots: [/tmp/projects]\nsocket: /tmp/s\nstate_dir: /tmp/d\nlisten_host: "{host}"\n'
+    )
+    with pytest.raises(ValueError):
+        Config.load(path)
