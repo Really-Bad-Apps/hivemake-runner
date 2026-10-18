@@ -1,6 +1,7 @@
 """Credential-free ACP peer for real stdio integration tests."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -29,11 +30,17 @@ class Echo(Agent):
         sid = str(uuid4())
         self.counts[sid] = 0
         self.cwd = Path(cwd)
+        self.session_options = kwargs
         return NewSessionResponse(sessionId=sid)
 
     async def prompt(self, session_id, prompt, **kwargs):
         self.counts[session_id] += 1
-        text = prompt[0].text
+        text = prompt[-1].text
+        if text == "inspect_profile":
+            text = json.dumps({
+                "options": self.session_options,
+                "blocks": [block.text for block in prompt],
+            })
         if text == "crash":
             sys.exit(7)
         if text == "hang":

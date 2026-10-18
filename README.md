@@ -101,6 +101,65 @@ Project instructions and MCP configuration remain the harness's responsibility;
 verify their loading before using real projects. A workspace is a working
 directory, not an OS security boundary.
 
+## Shared runner instruction profiles
+
+Write invocation-specific instructions once in a shared UTF-8 Markdown file.
+Register its name in the daemon's `runner.yaml`:
+
+```yaml
+instruction_profiles:
+  ticket-read-only:
+    file: /etc/hivemake-runner/instructions/ticket-read-only.md
+```
+
+Then reference it from each project's `agent.yaml` (the same syntax for either harness):
+
+```yaml
+version: 1
+id: example-developer
+harness: codex
+runner:
+  instruction_profile: ticket-read-only
+```
+
+An example profile is provided in `examples/instructions/ticket-read-only.md`.
+Copy it to the configured location and customize it there. Profile paths must be
+absolute; names use lowercase letters, digits, underscores and hyphens (up to 64
+characters, beginning with a letter or digit). Missing profiles, unreadable files,
+invalid UTF-8, empty content, NUL characters or files over 64 KiB prevent new
+sessions for that project. Discovery reports the project as unavailable on refresh.
+Files are checked again at session creation, even if discovery previously succeeded.
+Projects without a profile retain their existing behavior.
+
+The daemon reads and snapshots the file when a session is created, before an
+adapter is launched. Editing the Markdown affects new sessions immediately;
+existing sessions retain their original text, even if their first prompt has not
+yet been sent. Close and recreate a session to adopt a revision. Restart the daemon
+to change profile-name/path mappings; refresh discovery to change project references.
+Session and persisted run responses include `instructions` with the profile name,
+SHA-256 of the original file bytes, and delivery method, but not its path or text.
+Private ACP transcripts may still include the instructions echoed by a harness.
+
+Delivery is implemented inside the runner for the pinned adapters:
+
+| Harness | Delivery | Existing project rules |
+| --- | --- | --- |
+| Claude | `session/new` metadata appends to the `claude_code` system-prompt preset | Normal project instruction loading remains enabled |
+| Codex | A separate text block precedes the first request in the same ACP prompt | Normal `AGENTS.md` loading remains enabled |
+
+Codex ACP 2.1.1 does not expose supplemental system/developer instructions at session
+creation. Its fallback is **user-level conversation context**, not a system message;
+it generates no extra initialization turn. Follow-ups reuse the initialized
+conversation. Claude uses its adapter's native append mechanism, not a replacement
+system prompt. Keep the pinned adapter versions, and verify these integration paths
+when upgrading them.
+
+The runner never writes `CLAUDE.md`, `AGENTS.md`, or project configuration to inject
+instructions. Direct human launches are unaffected. These profiles are behavioral
+instructions, not filesystem restrictions or a sandbox. Existing permission handling
+is unchanged; the agent is expected to follow the shared profile just as it follows
+project instructions. Ticket routing and human escalation are separate features.
+
 ## Use through HiveMake
 
 Use your HiveMake origin and owner runner key (or a human login for dispatch).

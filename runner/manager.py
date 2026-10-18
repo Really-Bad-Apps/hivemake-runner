@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .acp_session import ACPSession
 from .discovery import discover
+from .instructions import InstructionError, load_instructions
 from .store import now
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,9 @@ class Manager:
         self.refresh()
 
     def refresh(self):
-        self.agents, self.discovery = discover(self.config.roots, self.config.commands)
+        self.agents, self.discovery = discover(
+            self.config.roots, self.config.commands, self.config.instruction_profiles
+        )
         return self.list_agents()
 
     def list_agents(self):
@@ -53,6 +56,12 @@ class Manager:
         command = self.config.commands.get(agent.harness)
         if not command or not shutil.which(command[0]):
             raise RunnerError("adapter_not_installed", 503)
+        try:
+            instructions = load_instructions(
+                agent.instruction_profile, self.config.instruction_profiles
+            )
+        except InstructionError as exc:
+            raise RunnerError(str(exc), 503) from None
         session_id = str(uuid4())
         self.sessions[session_id] = {
             "id": session_id,
@@ -61,6 +70,7 @@ class Manager:
             "runtime": None,
             "active_run": None,
             "valid": True,
+            "instructions": instructions,
         }
         return self.get_session(session_id)
 
@@ -78,6 +88,9 @@ class Manager:
             "created_at": s["created_at"],
             "active_run": s["active_run"],
             "status": "open" if s["valid"] else "expired",
+            "instructions": (
+                s["instructions"].metadata(s["agent"].harness) if s["instructions"] else None
+            ),
         }
 
     def submit(self, session_id, prompt):
@@ -109,6 +122,7 @@ class Manager:
             "truncated": False,
             "stop_reason": None,
             "error": None,
+            "instructions": self.get_session(session_id)["instructions"],
         }
         try:
             self.store.save(run)
@@ -167,6 +181,7 @@ class Manager:
                     self.config.commands[agent.harness],
                     lambda event: self._emit(session, event),
                     self.config.startup_timeout,
+                    session["instructions"],
                 )
             async with asyncio.timeout(self.config.run_timeout):
                 reason = await session["runtime"].prompt(run["prompt"])

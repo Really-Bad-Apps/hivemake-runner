@@ -2,11 +2,13 @@
 
 import ipaddress
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
+
+from .instructions import PROFILE_NAME
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,7 @@ class Config:
     listen_port: int = 7184
     hivemake_url: str | None = None
     display_name: str | None = None
+    instruction_profiles: dict[str, Path] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -42,6 +45,7 @@ class Config:
             "listen_port",
             "hivemake_url",
             "display_name",
+            "instruction_profiles",
         }
         if set(data) - allowed:
             raise ValueError("Unknown runner configuration fields")
@@ -65,6 +69,20 @@ class Config:
             ):
                 raise ValueError("Each adapter command must be a nonempty argv list")
         options = {}
+        profiles = data.get("instruction_profiles", {})
+        if not isinstance(profiles, dict):
+            raise ValueError("instruction_profiles must be a mapping")
+        resolved_profiles = {}
+        for name, profile in profiles.items():
+            if (
+                not isinstance(name, str)
+                or not PROFILE_NAME.fullmatch(name)
+                or not isinstance(profile, dict)
+                or set(profile) != {"file"}
+            ):
+                raise ValueError("Each instruction profile must have a valid name and file")
+            resolved_profiles[name] = absolute(profile["file"])
+        options["instruction_profiles"] = resolved_profiles
         for name in ("startup_timeout", "run_timeout", "cancel_grace", "max_sessions"):
             if name in data:
                 v = data[name]

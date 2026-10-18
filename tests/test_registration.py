@@ -56,6 +56,7 @@ async def test_registration_sends_identity_inventory_and_key_without_redirect(ma
         assert payload["display_name"] == "Friendly"
         assert payload["url"] == "http://100.64.0.10:7184"
         assert payload["agents"][0]["id"] == "demo"
+        assert "instruction_profile" not in payload["agents"][0]
         assert "hm_owner_test" not in json.dumps(payload)
     finally:
         await server.cleanup()

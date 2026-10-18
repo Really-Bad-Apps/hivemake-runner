@@ -35,10 +35,12 @@ class Callbacks(Client):
 
 
 class ACPSession:
-    def __init__(self, agent, command, emit, startup_timeout):
+    def __init__(self, agent, command, emit, startup_timeout, instructions=None):
         self.agent, self.command = agent, command
         self.callbacks = Callbacks(emit)
         self.startup_timeout = startup_timeout
+        self.instructions = instructions
+        self.first_prompt = True
         self.process = self.connection = self.session_id = None
         self.stderr_task = None
         self.closed = False
@@ -67,8 +69,16 @@ class ACPSession:
                 )
                 if initialized.protocol_version != PROTOCOL_VERSION:
                     raise RuntimeError("Unsupported ACP protocol version")
+                options = {}
+                if self.instructions and self.agent.harness == "claude":
+                    # The pinned Claude adapter appends to its claude_code preset.
+                    # A plain string would REPLACE that preset; never use one.
+                    options["systemPrompt"] = {
+                        "type": "preset", "preset": "claude_code",
+                        "append": self.instructions.text,
+                    }
                 session = await self.connection.new_session(
-                    cwd=self.agent.workspace, mcp_servers=[]
+                    cwd=self.agent.workspace, mcp_servers=[], **options
                 )
                 self.session_id = session.session_id
         except BaseException:
@@ -84,7 +94,17 @@ class ACPSession:
     async def prompt(self, text):
         if self.connection is None:
             await self.start()
-        result = await self.connection.prompt(session_id=self.session_id, prompt=[text_block(text)])
+        blocks = [text_block(text)]
+        if self.first_prompt and self.instructions and self.agent.harness == "codex":
+            # codex-acp 2.1.1 exposes no supplemental system/developer field.
+            # Use standard ACP text context before the first user request.
+            blocks.insert(0, text_block(
+                "Runner session instructions (apply throughout this conversation):\n\n"
+                + self.instructions.text
+                + "\n\nThe next content block is the request to handle under these instructions."
+            ))
+        result = await self.connection.prompt(session_id=self.session_id, prompt=blocks)
+        self.first_prompt = False
         return result.stop_reason
 
     async def cancel(self):

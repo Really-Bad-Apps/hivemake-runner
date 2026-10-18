@@ -6,6 +6,10 @@ state_dir: /var/lib/hivemake-runner
 commands:
   codex: [/opt/hivemake-runner/adapters/node_modules/.bin/codex-acp]
   claude: [/opt/hivemake-runner/adapters/node_modules/.bin/claude-agent-acp]
+# Install the shared Markdown once; any discovered project can reference this name.
+instruction_profiles:
+  ticket-read-only:
+    file: /etc/hivemake-runner/instructions/ticket-read-only.md
 startup_timeout: 60
 run_timeout: 1800
 cancel_grace: 5

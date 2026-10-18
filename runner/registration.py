@@ -39,7 +39,12 @@ async def register_once(client, config, manager, runner_id, display_name, key):
         "id": runner_id,
         "display_name": display_name,
         "url": f"http://{config.listen_host}:{config.listen_port}",
-        "agents": manager.list_agents()["agents"],
+        # Keep the registry inventory compatible with existing HiveMake servers.
+        # Detailed runner-only configuration is available through proxy endpoints.
+        "agents": [
+            {key: value for key, value in agent.items() if key != "instruction_profile"}
+            for agent in manager.list_agents()["agents"]
+        ],
     }
     async with client.post(
         config.hivemake_url + "/api/runners/register",

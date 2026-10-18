@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from .instructions import PROFILE_NAME, InstructionError, load_instructions
+
 SKIP = {
     ".git",
     ".hg",
@@ -30,12 +32,13 @@ class Agent:
     name: str
     harness: str
     workspace: str
+    instruction_profile: str | None = None
 
     def to_dict(self):
         return asdict(self)
 
 
-def discover(roots, commands):
+def discover(roots, commands, instruction_profiles=None):
     agents, errors, seen, duplicates = {}, [], set(), set()
     for root in roots:
         if root.is_symlink() or not root.is_dir():
@@ -64,6 +67,7 @@ def discover(roots, commands):
                     "id",
                     "name",
                     "harness",
+                    "runner",
                 }:
                     raise ValueError("invalid_marker_fields")
                 if type(data.get("version")) is not int or data["version"] != 1:
@@ -79,7 +83,15 @@ def discover(roots, commands):
                 name = data.get("name", agent_id)
                 if not isinstance(name, str) or not name.strip() or len(name) > 128:
                     raise ValueError("invalid_agent_name")
-                agent = Agent(agent_id, name, harness, str(base.resolve()))
+                runner = data.get("runner", {})
+                if not isinstance(runner, dict) or set(runner) - {"instruction_profile"}:
+                    raise ValueError("invalid_runner_fields")
+                profile = runner.get("instruction_profile")
+                if "instruction_profile" in runner and (
+                    not isinstance(profile, str) or not PROFILE_NAME.fullmatch(profile)
+                ):
+                    raise ValueError("invalid_instruction_profile")
+                agent = Agent(agent_id, name, harness, str(base.resolve()), profile)
                 if agent_id in agents or agent_id in duplicates:
                     agents.pop(agent_id, None)
                     duplicates.add(agent_id)
@@ -98,11 +110,16 @@ def discover(roots, commands):
     for agent in sorted(agents.values(), key=lambda a: a.id):
         command = commands.get(agent.harness)
         ready = bool(command and shutil.which(command[0]))
+        unavailable_reason = None if ready else "adapter_not_installed"
+        try:
+            load_instructions(agent.instruction_profile, instruction_profiles or {})
+        except InstructionError as exc:
+            ready, unavailable_reason = False, str(exc)
         rows.append(
             {
                 **agent.to_dict(),
                 "ready": ready,
-                "unavailable_reason": None if ready else "adapter_not_installed",
+                "unavailable_reason": unavailable_reason,
             }
         )
     return agents, {"agents": rows, "errors": errors}
