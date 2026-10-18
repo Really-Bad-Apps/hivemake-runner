@@ -243,3 +243,14 @@ both real harnesses in disposable projects before directing production work.
 The retired standalone Flask gateway remains in Git history at the prototype
 release. Retire its deployment only after migrating clients to HiveMake and
 verifying the new registration and dispatch path.
+
+### Idempotent unattended executions
+
+`PUT /executions/{execution_uuid}` accepts `agent_id` and `prompt`. The caller
+chooses a UUID and persists it before submission. Repeating the same UUID and
+payload returns its durable run, including after daemon restart; a different
+payload returns 409. Admission still rejects a busy project. There is no queue.
+Use `GET /runs/{execution_uuid}` to recover a lost response. Each new execution
+gets a fresh session with the project's shared instruction profile. These
+sessions close automatically when execution finishes. Existing interactive
+session endpoints keep their original behavior.

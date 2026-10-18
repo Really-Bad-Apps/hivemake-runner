@@ -93,7 +93,7 @@ class Manager:
             ),
         }
 
-    def submit(self, session_id, prompt):
+    def submit(self, session_id, prompt, *, run_id=None):
         if self.stopping:
             raise RunnerError("runner_stopping", 503)
         if not self._flush_pending():
@@ -108,7 +108,7 @@ class Manager:
             raise RunnerError("agent_busy", 409)
         # No await between admission and reservation: concurrent requests cannot
         # both start a run. Separate sessions still share the agent reservation.
-        run_id = str(uuid4())
+        run_id = run_id or str(uuid4())
         run = {
             "id": run_id,
             "session_id": session_id,
@@ -120,6 +120,8 @@ class Manager:
             "response": "",
             "events": [],
             "truncated": False,
+            "response_truncated": False,
+            "events_truncated": False,
             "stop_reason": None,
             "error": None,
             "instructions": self.get_session(session_id)["instructions"],
@@ -134,6 +136,32 @@ class Manager:
         self.tasks[run_id] = asyncio.create_task(self._execute(s, run))
         return dict(run)
 
+    async def dispatch(self, execution_id, agent_id, prompt):
+        """One durable run per caller execution UUID, including after restart."""
+        from uuid import UUID
+
+        execution_id = str(UUID(execution_id))
+        existing = self.get_run_or_none(execution_id)
+        if existing is not None:
+            if existing["agent_id"] != agent_id or existing["prompt"] != prompt:
+                raise RunnerError("execution_conflict", 409)
+            return existing
+        session = self.new_session(agent_id)
+        self.sessions[session["id"]]["auto_close"] = True
+        try:
+            return self.submit(session["id"], prompt, run_id=execution_id)
+        except Exception:
+            await self.close_session(session["id"])
+            raise
+
+    def get_run_or_none(self, run_id):
+        try:
+            return self.get_run(run_id)
+        except RunnerError as exc:
+            if exc.code == "run_not_found":
+                return None
+            raise
+
     def _emit(self, session, event):
         run = self.runs.get(session["active_run"])
         if run is None:
@@ -146,11 +174,13 @@ class Manager:
                 run["response"] += text[:available]
                 if len(text) > available:
                     run["truncated"] = True
+                    run["response_truncated"] = True
         # Bound snapshots (including unusually large tool results).
         if len(run["events"]) < MAX_EVENTS and len(json.dumps(event)) <= 16384:
             run["events"].append(event)
         else:
             run["truncated"] = True
+            run["events_truncated"] = True
         self._persist(run)
 
     def _persist(self, run):
@@ -225,8 +255,10 @@ class Manager:
         self._persist(run)
         self.busy.pop(session["agent"].id, None)
         session["active_run"] = None
-        self.tasks.pop(run["id"], None)
         self.runs.pop(run["id"], None)
+        if session.get("auto_close"):
+            await self.close_session(session["id"])
+        self.tasks.pop(run["id"], None)
         log.info("run_finished run_id=%s status=%s", run["id"], run["status"])
 
     def get_run(self, run_id):

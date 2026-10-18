@@ -198,3 +198,32 @@ def test_recovery_only_deserializes_unfinished_runs(tmp_path, monkeypatch, legac
     store = Store(path)
     assert loaded == []
     store.close()
+
+
+async def test_execution_id_survives_restart(config, tmp_path):
+    from uuid import uuid4
+
+    from tests_helpers import wait_finished
+
+    from runner.manager import Manager
+    from runner.store import Store
+
+    path = tmp_path / "dedup.sqlite3"
+    store = Store(path)
+    first = Manager(config, store)
+    eid = str(uuid4())
+    run = await first.dispatch(eid, "demo", "hello")
+    await wait_finished(first, eid)
+    assert run["session_id"] not in first.sessions
+    await first.shutdown()
+    store.close()
+    store = Store(path)
+    second = Manager(config, store)
+    try:
+        replay = await second.dispatch(eid, "demo", "hello")
+        assert replay["id"] == eid
+        assert replay["response"] == "turn 1: hello"
+        assert second.sessions == {}
+    finally:
+        await second.shutdown()
+        store.close()

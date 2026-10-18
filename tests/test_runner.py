@@ -175,3 +175,21 @@ def test_reject_public_or_wildcard_control_listener(tmp_path, host):
     )
     with pytest.raises(ValueError):
         Config.load(path)
+
+
+async def test_output_and_event_truncation_are_distinct(manager, monkeypatch):
+    from runner import manager as module
+
+    monkeypatch.setattr(module, "MAX_EVENTS", 0)
+    session = manager.new_session("demo")
+    run = manager.submit(session["id"], "hello")
+    from tests_helpers import wait_finished
+
+    await wait_finished(manager, run["id"])
+    result = manager.get_run(run["id"])
+    assert result["events_truncated"] is True
+    assert result["response_truncated"] is False
+    monkeypatch.setattr(module, "MAX_OUTPUT", 2)
+    run = manager.submit(session["id"], "hello")
+    await wait_finished(manager, run["id"])
+    assert manager.get_run(run["id"])["response_truncated"] is True

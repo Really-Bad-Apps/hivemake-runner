@@ -57,3 +57,22 @@ async def test_busy_and_validation_statuses(api):
     assert status == 409 and error["error"] == "agent_busy"
     assert (await api("DELETE", f"/sessions/{session['id']}"))[0] == 409
     assert (await api("POST", f"/runs/{run['id']}/cancel"))[0] == 202
+
+
+async def test_idempotent_execution_api(api, manager):
+    from uuid import uuid4
+
+    eid = str(uuid4())
+    body = {"agent_id": "demo", "prompt": "hello"}
+    first = (await api("PUT", f"/executions/{eid}", json=body))[1]
+    second = (await api("PUT", f"/executions/{eid}", json=body))[1]
+    assert first["id"] == second["id"] == eid
+    assert first["session_id"] == second["session_id"]
+    assert len(manager.sessions) == 1
+    from tests_helpers import wait_finished
+
+    await wait_finished(manager, eid)
+    third = (await api("PUT", f"/executions/{eid}", json=body))[1]
+    assert third["response"] == "turn 1: hello"
+    assert (await api("PUT", f"/executions/{eid}", json={**body, "prompt": "changed"}))[0] == 409
+    assert (await api("PUT", "/executions/not-a-uuid", json=body))[0] == 400

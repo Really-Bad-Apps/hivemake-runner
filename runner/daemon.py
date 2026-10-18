@@ -75,6 +75,22 @@ def create_control_app(manager):
         )
         return web.json_response(result, status=202)
 
+    async def execution(request):
+        if request.content_type != "application/json":
+            raise RunnerError("json_required", 415)
+        data = await request.json()
+        if not isinstance(data, dict) or set(data) != {"agent_id", "prompt"}:
+            raise RunnerError("invalid_request")
+        for field, limit in (("agent_id", 64), ("prompt", 65536)):
+            if (
+                not isinstance(data[field], str)
+                or not data[field].strip()
+                or len(data[field]) > limit
+            ):
+                raise RunnerError("invalid_request")
+        result = await manager.dispatch(request.match_info["execution_id"], **data)
+        return web.json_response(result, status=202)
+
     async def run(request):
         return web.json_response(manager.get_run(request.match_info["run_id"]))
 
@@ -84,6 +100,7 @@ def create_control_app(manager):
     app.add_routes(
         [
             web.get("/health", health),
+            web.put("/executions/{execution_id}", execution),
             web.get("/agents", agents),
             web.post("/agents/refresh", refresh),
             web.post("/sessions", sessions),
