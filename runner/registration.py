@@ -56,10 +56,18 @@ async def register_once(client, config, manager, runner_id, display_name, key):
         return response.status
 
 
+async def wait_for_inventory(manager, timeout):
+    try:
+        await asyncio.wait_for(manager.inventory_changed.wait(), timeout)
+    except TimeoutError:
+        pass
+
+
 async def heartbeat(config, manager, runner_id, display_name, key):
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as client:
         while True:
+            manager.inventory_changed.clear()
             try:
                 status = await register_once(client, config, manager, runner_id, display_name, key)
                 if status != 200:
@@ -76,4 +84,4 @@ async def heartbeat(config, manager, runner_id, display_name, key):
                     display_name,
                     type(exc).__name__,
                 )
-            await asyncio.sleep(30)
+            await wait_for_inventory(manager, 30)

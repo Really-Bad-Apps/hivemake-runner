@@ -91,7 +91,14 @@ harness: codex  # or claude
 ```
 
 The marker's directory is the workspace. Discovery runs at daemon startup and
-on explicit refresh. It scans nested projects, skips dependency directories and
+every 60 seconds by default, and on explicit refresh. Set `discovery_interval`
+in runner.yaml to a positive number of seconds (restart the daemon to change it).
+The interval is measured from scan completion; filesystem scan time is additional.
+Each completed refresh immediately schedules publication to HiveMake, without
+waiting for the normal 30-second heartbeat. Network failures retry on heartbeats.
+Scans run off the event loop and do not interrupt active sessions: existing sessions
+retain their original agent and instruction snapshots; new sessions use the updated
+inventory. Automatic discovery also runs in standalone mode. It scans nested projects, skips dependency directories and
 virtual environments, and does not follow symlinks. Duplicate IDs on one host
 are excluded with discovery errors. Different runner hosts can use the same
 agent ID: API calls identify both the runner UUID and agent ID.
@@ -189,7 +196,7 @@ All execution endpoints are under `/api/runners/{runner_id}`:
 | Method / suffix | Purpose |
 | --- | --- |
 | GET `/agents` | Current discovered projects, availability and errors |
-| POST `/agents/refresh` | Rescan local roots; next heartbeat updates registry inventory |
+| POST `/agents/refresh` | Rescan local roots and immediately schedule registry publication |
 | POST `/sessions` | Fresh conversation, body `{"agent_id":"..."}` |
 | GET `/sessions/{id}` | Session state and active run |
 | DELETE `/sessions/{id}` | Close idle session (409 if busy) |

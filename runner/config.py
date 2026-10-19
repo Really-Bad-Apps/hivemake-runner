@@ -17,6 +17,7 @@ class Config:
     socket: Path
     state_dir: Path
     commands: dict[str, tuple[str, ...]]
+    discovery_interval: float = 60
     startup_timeout: float = 60
     run_timeout: float = 1800
     cancel_grace: float = 5
@@ -37,6 +38,7 @@ class Config:
             "socket",
             "state_dir",
             "commands",
+            "discovery_interval",
             "startup_timeout",
             "run_timeout",
             "cancel_grace",
@@ -83,7 +85,13 @@ class Config:
                 raise ValueError("Each instruction profile must have a valid name and file")
             resolved_profiles[name] = absolute(profile["file"])
         options["instruction_profiles"] = resolved_profiles
-        for name in ("startup_timeout", "run_timeout", "cancel_grace", "max_sessions"):
+        for name in (
+            "discovery_interval",
+            "startup_timeout",
+            "run_timeout",
+            "cancel_grace",
+            "max_sessions",
+        ):
             if name in data:
                 v = data[name]
                 if (

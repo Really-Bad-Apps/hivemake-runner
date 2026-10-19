@@ -55,7 +55,7 @@ def create_control_app(manager):
         return web.json_response(manager.list_agents())
 
     async def refresh(request):
-        return web.json_response(manager.refresh())
+        return web.json_response(await manager.refresh_async())
 
     async def sessions(request):
         return web.json_response(
@@ -135,6 +135,7 @@ async def serve(config):
             config.socket.unlink()
         runner_id, display_name = identity(config.state_dir, config.display_name)
         registration_task = None
+        discovery_task = None
         store = Store(config.state_dir / "runs.sqlite3")
         manager = Manager(config, store)
         server = web.AppRunner(create_control_app(manager), access_log=None)
@@ -154,16 +155,18 @@ async def serve(config):
                 display_name,
                 len(manager.agents),
             )
+            discovery_task = asyncio.create_task(manager.periodic_discovery())
             if config.hivemake_url:
                 registration_task = asyncio.create_task(
                     heartbeat(config, manager, runner_id, display_name, owner_key)
                 )
             await stop.wait()
         finally:
-            if registration_task:
-                registration_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await registration_task
+            for task in (discovery_task, registration_task):
+                if task:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             manager.stopping = True
             await server.cleanup()
             await manager.shutdown()

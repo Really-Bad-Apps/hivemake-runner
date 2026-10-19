@@ -93,19 +93,16 @@ async def test_heartbeat_recovers_and_repeats(monkeypatch, config, manager, capl
 
     calls = AsyncMock(side_effect=[aiohttp.ClientConnectionError("secret-do-not-log"), 200])
     monkeypatch.setattr(registration, "register_once", calls)
-    original_sleep = registration.asyncio.sleep
     sleeps = 0
 
-    async def sleep(delay):
+    async def sleep(manager, delay):
         nonlocal sleeps
-        if delay == 0:
-            return await original_sleep(0)
         assert delay == 30
         sleeps += 1
         if sleeps == 2:
             raise KeyboardInterruptForTest()
 
-    monkeypatch.setattr(registration.asyncio, "sleep", sleep)
+    monkeypatch.setattr(registration, "wait_for_inventory", sleep)
     with pytest.raises(KeyboardInterruptForTest):
         await registration.heartbeat(config, manager, "id", "host", "hm_owner_test")
     assert calls.await_count == 2

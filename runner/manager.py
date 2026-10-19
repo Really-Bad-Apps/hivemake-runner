@@ -30,6 +30,8 @@ class Manager:
         self.sessions, self.busy, self.tasks, self.cancel_tasks = {}, {}, {}, {}
         self.runs = {}
         self.pending_results = {}
+        self.inventory_changed = asyncio.Event()
+        self.discovery_lock = asyncio.Lock()
         self.stopping = False
         self.refresh()
 
@@ -38,6 +40,29 @@ class Manager:
             self.config.roots, self.config.commands, self.config.instruction_profiles
         )
         return self.list_agents()
+
+    async def refresh_async(self):
+        # Scan off-loop so large trees cannot stall ACP traffic or heartbeats.
+        # Publish only the completed snapshot, on the owning event loop.
+        async with self.discovery_lock:
+            agents, discovery = await asyncio.to_thread(
+                discover,
+                self.config.roots,
+                self.config.commands,
+                self.config.instruction_profiles,
+            )
+            self.agents, self.discovery = agents, discovery
+            self.inventory_changed.set()
+            return self.list_agents()
+
+    async def periodic_discovery(self):
+        while True:
+            await asyncio.sleep(self.config.discovery_interval)
+            try:
+                await self.refresh_async()
+            except Exception as exc:
+                # Keep the last complete inventory and retry on the next cycle.
+                log.warning("runner_discovery_failed type=%s", type(exc).__name__)
 
     def list_agents(self):
         return {

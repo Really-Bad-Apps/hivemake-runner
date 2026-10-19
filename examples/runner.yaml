@@ -10,6 +10,7 @@ commands:
 instruction_profiles:
   ticket-read-only:
     file: /etc/hivemake-runner/instructions/ticket-read-only.md
+discovery_interval: 60  # Seconds between completed scan and next automatic scan.
 startup_timeout: 60
 run_timeout: 1800
 cancel_grace: 5
