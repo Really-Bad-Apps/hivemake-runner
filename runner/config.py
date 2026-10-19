@@ -17,7 +17,6 @@ class Config:
     socket: Path
     state_dir: Path
     commands: dict[str, tuple[str, ...]]
-    discovery_interval: float = 60
     startup_timeout: float = 60
     run_timeout: float = 1800
     cancel_grace: float = 5
@@ -27,6 +26,7 @@ class Config:
     hivemake_url: str | None = None
     display_name: str | None = None
     instruction_profiles: dict[str, Path] = field(default_factory=dict)
+    discovery_interval: float = 60
 
     @classmethod
     def load(cls, path: Path) -> "Config":

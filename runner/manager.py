@@ -31,7 +31,7 @@ class Manager:
         self.runs = {}
         self.pending_results = {}
         self.inventory_changed = asyncio.Event()
-        self.discovery_lock = asyncio.Lock()
+        self.discovery_task = None
         self.stopping = False
         self.refresh()
 
@@ -42,18 +42,32 @@ class Manager:
         return self.list_agents()
 
     async def refresh_async(self):
-        # Scan off-loop so large trees cannot stall ACP traffic or heartbeats.
-        # Publish only the completed snapshot, on the owning event loop.
-        async with self.discovery_lock:
-            agents, discovery = await asyncio.to_thread(
-                discover,
-                self.config.roots,
-                self.config.commands,
-                self.config.instruction_profiles,
-            )
+        if self.stopping:
+            raise RunnerError("runner_stopping", 503)
+        # Callers share one scan. Cancelling an HTTP request must not cancel
+        # its worker or allow a second scan to overlap the still-running thread.
+        if self.discovery_task is None or self.discovery_task.done():
+            self.discovery_task = asyncio.create_task(self._refresh_inventory())
+            self.discovery_task.add_done_callback(self._discovery_finished)
+        return await asyncio.shield(self.discovery_task)
+
+    @staticmethod
+    def _discovery_finished(task):
+        # Retrieve errors even when all waiting requests have been cancelled.
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            log.warning("runner_discovery_failed type=%s", type(exc).__name__)
+
+    async def _refresh_inventory(self):
+        agents, discovery = await asyncio.to_thread(
+            discover,
+            self.config.roots,
+            self.config.commands,
+            self.config.instruction_profiles,
+        )
+        if not self.stopping:
             self.agents, self.discovery = agents, discovery
             self.inventory_changed.set()
-            return self.list_agents()
+        return self.list_agents()
 
     async def periodic_discovery(self):
         while True:
@@ -360,3 +374,5 @@ class Manager:
                 await s["runtime"].close()
 
         self._flush_pending()
+        if self.discovery_task is not None:
+            await asyncio.gather(self.discovery_task, return_exceptions=True)
