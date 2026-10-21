@@ -97,9 +97,39 @@ def create_control_app(manager):
     async def cancel(request):
         return web.json_response(manager.cancel(request.match_info["run_id"]), status=202)
 
+    async def attachment(request):
+        ident = request.match_info["attachment_id"]
+        if request.method == "DELETE":
+            await manager.attachments.detach(ident)
+            return web.Response(status=204)
+        if request.method == "GET":
+            return web.json_response(manager.attachments.get(ident))
+        data = await object_body(request, {"agent_id", "session_id", "expires_at"})
+        return web.json_response(manager.attachments.register(ident, **data), status=202)
+
+    async def delivery(request):
+        ident = request.match_info["delivery_id"]
+        if request.method == "GET":
+            return web.json_response(manager.attachments.delivery(ident))
+        data = await object_body(request, {"attachment_id", "message"})
+        return web.json_response(manager.attachments.deliver(ident, **data), status=202)
+
+    async def object_body(request, keys):
+        if request.content_type != "application/json":
+            raise RunnerError("json_required", 415)
+        data = await request.json()
+        if not isinstance(data, dict) or set(data) != keys:
+            raise RunnerError("invalid_request")
+        return data
+
     app.add_routes(
         [
             web.get("/health", health),
+            web.put("/attachments/{attachment_id}", attachment),
+            web.get("/attachments/{attachment_id}", attachment),
+            web.delete("/attachments/{attachment_id}", attachment),
+            web.put("/deliveries/{delivery_id}", delivery),
+            web.get("/deliveries/{delivery_id}", delivery),
             web.put("/executions/{execution_id}", execution),
             web.get("/agents", agents),
             web.post("/agents/refresh", refresh),

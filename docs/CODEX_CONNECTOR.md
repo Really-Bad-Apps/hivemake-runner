@@ -6,6 +6,11 @@ apply **Workspace access with `on-request`**. This is the accepted permission
 policy, replacing the original requirement to inherit terminal permissions.
 This is not an end-to-end ticket reply implementation.
 
+Follow-up [terminal compatibility tests](TERMINAL_COMPATIBILITY.md) verified
+project instructions and MCP behavior, but found that a prompt during native
+work steers the active turn. Native steering is the accepted return-message
+behavior; strict idle-only admission is no longer a release gate.
+
 ## Component boundary
 
 `runner/codex_connector.py` translates JSONL framing on stdin/stdout into text
@@ -31,8 +36,9 @@ manager. It loads the supplied exact session UUID, applies `workspace-write`
 through ACP, and reuses its adapter for successive prompts. It never creates a
 new session, injects autonomous instructions, or sends a session cancel/close.
 Failures detach without automatic replay; possible submission remains uncertain.
-Its local concurrency guard does not establish that the native terminal is idle.
-Ownership, workspace association, liveness and native idle validation still
+Its local concurrency guard serializes runner prompts; it does not prevent
+delivery during a human's native turn. Native steering is intentional.
+Ownership, workspace association and liveness validation still
 belong to the future attachment layer; this class is not a registration API.
 
 Permission callbacks remain pending while the original terminal handles the
@@ -135,3 +141,12 @@ concurrent prompt rejection, detach-only cancellation and human-owned approvals.
 Review regressions also cover cancellation during adapter creation, a stalled
 WebSocket upgrade, lossless JSON numeric framing, and private failure reports.
 Full runner suite: 88 tests passed; lint clean.
+
+## Attachment and delivery integration
+
+The compatibility follow-up is recorded in `TERMINAL_COMPATIBILITY.md`. Native
+steering is accepted. Explicit leases, read-only live-thread validation and
+SQLite delivery admission are now implemented; see `TERMINAL_ATTACHMENTS.md`.
+The earlier 88-test count above describes the transport milestone, not the current
+suite. Production rollout and the human-driven end-to-end acceptance remain
+separate gates.

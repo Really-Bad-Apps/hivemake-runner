@@ -27,6 +27,7 @@ class Config:
     display_name: str | None = None
     instruction_profiles: dict[str, Path] = field(default_factory=dict)
     discovery_interval: float = 60
+    codex_socket: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -35,6 +36,7 @@ class Config:
             raise ValueError("Runner configuration must be a mapping")
         allowed = {
             "roots",
+            "codex_socket",
             "socket",
             "state_dir",
             "commands",
@@ -71,6 +73,8 @@ class Config:
             ):
                 raise ValueError("Each adapter command must be a nonempty argv list")
         options = {}
+        if data.get("codex_socket") is not None:
+            options["codex_socket"] = absolute(data["codex_socket"])
         profiles = data.get("instruction_profiles", {})
         if not isinstance(profiles, dict):
             raise ValueError("instruction_profiles must be a mapping")

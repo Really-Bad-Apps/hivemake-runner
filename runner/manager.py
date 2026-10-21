@@ -34,6 +34,8 @@ class Manager:
         self.discovery_task = None
         self.stopping = False
         self.refresh()
+        from .attachments import Attachments
+        self.attachments = Attachments(self)
 
     def refresh(self):
         self.agents, self.discovery = discover(
@@ -74,6 +76,7 @@ class Manager:
             await asyncio.sleep(self.config.discovery_interval)
             try:
                 await self.refresh_async()
+                await self.attachments.reap()
             except Exception as exc:
                 # Keep the last complete inventory and retry on the next cycle.
                 log.warning("runner_discovery_failed type=%s", type(exc).__name__)
@@ -89,7 +92,7 @@ class Manager:
             raise RunnerError("runner_stopping", 503)
         if agent_id not in self.agents:
             raise RunnerError("agent_not_found", 404)
-        if len(self.sessions) >= self.config.max_sessions:
+        if len(self.sessions) + self.attachments.count() >= self.config.max_sessions:
             raise RunnerError("session_limit", 409)
         agent = self.agents[agent_id]
         command = self.config.commands.get(agent.harness)
@@ -359,6 +362,7 @@ class Manager:
 
     async def shutdown(self):
         self.stopping = True
+        await self.attachments.shutdown()
         for task in list(self.cancel_tasks.values()):
             task.cancel()
         await asyncio.gather(*list(self.cancel_tasks.values()), return_exceptions=True)

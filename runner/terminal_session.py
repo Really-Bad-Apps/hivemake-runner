@@ -133,7 +133,8 @@ class CodexTerminalSession:
         if self._busy:
             raise RuntimeError("Terminal connection already has a pending prompt")
         # This excludes concurrent calls through THIS connection, not native
-        # human turns. Public delivery must additionally prove native idle state.
+        # human turns. Native steering of a human turn is intentional; callers
+        # must serialize their own deliveries, not wait for native idleness.
         self._busy = True
         try:
             result = await self.connection.prompt(
