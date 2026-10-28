@@ -5,10 +5,10 @@ SDK. Deploy it on machines containing your projects and provider logins.
 The REST gateway lives in **HiveMake server**; this repository contains no Flask
 API container or Docker image build.
 
-Experimental live-terminal integration is documented in
-[Codex connector](docs/CODEX_CONNECTOR.md). Its transport is implemented, but
-the terminal connection applies Workspace access with human approval requests.
-Public attachment registration and ticket reply delivery are not enabled yet.
+Native-terminal attachment and reply injection have been retired. Ordinary ACP
+execution remains supported. See [retirement notes](docs/TERMINAL_ATTACHMENTS.md)
+for compatibility behavior and preservation of delivery history. Runner-owned
+persistent sessions are a separate future feature, not enabled by this cleanup.
 
 ```text
 Client → HiveMake API → Tailscale HTTP → runner daemon → Codex / Claude

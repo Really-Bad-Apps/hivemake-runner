@@ -1,3 +1,7 @@
+> HISTORICAL EXPERIMENT ONLY: the native-terminal connector and probe scripts
+> have been removed. Do not use the setup/commands below. See
+> [retirement notes](TERMINAL_ATTACHMENTS.md) for current behavior.
+
 # Codex connector: phase 1
 
 Status: experimental transport and retained terminal connection implemented;

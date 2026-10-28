@@ -46,6 +46,19 @@ async def test_api_to_unix_socket_to_acp(api):
     assert (await api("DELETE", f"/sessions/{session['id']}"))[0] == 204
 
 
+@pytest.mark.parametrize("method,path", [
+    ("PUT", "/attachments/old"), ("GET", "/attachments/old"),
+    ("DELETE", "/attachments/old"), ("PUT", "/deliveries/old"),
+    ("GET", "/deliveries/old"),
+])
+async def test_retired_paths_never_start_sessions(api, manager, method, path):
+    status, payload = await api(method, path, json={})
+    assert status == 410
+    assert payload == {"error": "terminal_replies_retired"}
+    assert manager.sessions == {}
+    assert manager.tasks == {}
+
+
 async def test_busy_and_validation_statuses(api):
     _, session = await api("POST", "/sessions", json={"agent_id": "demo"})
     path = f"/sessions/{session['id']}/runs"

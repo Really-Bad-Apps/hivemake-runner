@@ -1,6 +1,7 @@
 """Explicit local configuration; no credentials or infrastructure defaults."""
 
 import ipaddress
+import logging
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +28,6 @@ class Config:
     display_name: str | None = None
     instruction_profiles: dict[str, Path] = field(default_factory=dict)
     discovery_interval: float = 60
-    codex_socket: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -74,7 +74,9 @@ class Config:
                 raise ValueError("Each adapter command must be a nonempty argv list")
         options = {}
         if data.get("codex_socket") is not None:
-            options["codex_socket"] = absolute(data["codex_socket"])
+            logging.getLogger(__name__).warning(
+                "codex_socket is retired and ignored; remove it from runner configuration"
+            )
         profiles = data.get("instruction_profiles", {})
         if not isinstance(profiles, dict):
             raise ValueError("instruction_profiles must be a mapping")

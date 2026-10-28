@@ -1,3 +1,7 @@
+> HISTORICAL EXPERIMENT ONLY: the native-terminal connector and probe scripts
+> have been removed. Do not use the setup/commands below. See
+> [retirement notes](TERMINAL_ATTACHMENTS.md) for current behavior.
+
 # Live terminal compatibility findings
 
 Tested with native Codex 0.163.0, codex-acp 2.1.1 and Python ACP SDK 0.12.1.

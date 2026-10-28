@@ -22,6 +22,4 @@ hivemake_url: https://api.example.com
 display_name: Development host
 # Set HIVEMAKE_OWNER_API_KEY in the service environment, never in this YAML.
 
-# Optional: existing native Codex server Unix socket. Enables explicit terminal
-# attachments; the runner never starts or owns that server. Omit to disable.
-# codex_socket: /run/user/1000/codex/app-server.sock
+# Legacy codex_socket is retired and ignored. Remove it from older configurations.
