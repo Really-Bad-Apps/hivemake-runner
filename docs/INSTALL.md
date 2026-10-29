@@ -204,6 +204,15 @@ conservative starting capacity; increase deliberately for multi-project hosts.
 To support both providers, add both adapter paths to `commands` and authenticate
 both providers under the service account.
 
+### Optional: restrict unattended sessions with a shared profile
+
+The repository includes both `ticket-read-only` and a customizable `ticket-admin`
+template in `examples/instructions/`. Choose the intended scope with the host
+owner and follow [the profile installation guide](INSTRUCTION_PROFILES.md).
+For a fresh installation, add its mapping and marker reference before first
+startup. On an existing runner, load the mapping before publishing a new marker
+reference. Profiles are behavioral instructions, not an enforced sandbox.
+
 ## 4. Give the service its credentials
 
 In HiveMake **account settings → Runner keys**, create an owner runner key named

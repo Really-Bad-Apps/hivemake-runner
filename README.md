@@ -101,8 +101,13 @@ runner:
   instruction_profile: ticket-read-only
 ```
 
-An example profile is provided in `examples/instructions/ticket-read-only.md`.
-Copy it to the configured location and customize it there. Profile paths must be
+Two example profiles are provided together:
+[ticket-read-only](examples/instructions/ticket-read-only.md) for inspection,
+and [ticket-admin](examples/instructions/ticket-admin.md) for explicitly scoped
+host administration. Follow the [profile customization and rollout guide](docs/INSTRUCTION_PROFILES.md)
+before installation. The admin template's placeholders must be filled manually;
+the runner reads literal Markdown and does not substitute or validate them.
+Copy the selected profile to the configured location. Profile paths must be
 absolute; names use lowercase letters, digits, underscores and hyphens (up to 64
 characters, beginning with a letter or digit). Missing profiles, unreadable files,
 invalid UTF-8, empty content, NUL characters or files over 64 KiB prevent new
