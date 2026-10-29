@@ -18,58 +18,20 @@ Client → HiveMake API → Tailscale HTTP → runner daemon → Codex / Claude
 
 ## Install
 
-Linux, Python 3.12+, Node.js 22+, and an account already authenticated with the
-agent providers are required. Agents run directly on that host as that account.
+Follow the [reusable installation guide](docs/INSTALL.md) for a complete,
+per-user systemd installation, credential setup, agent binding, acceptance,
+troubleshooting and upgrades. It includes the provider-token environment fix
+validated on Vulcan and commands suitable for handing to another host agent.
 
-```bash
-git clone https://github.com/Really-Bad-Apps/hivemake-runner.git
-cd hivemake-runner
-python3 -m venv .
-source bin/activate
-pip install -r requirements.txt
-npm ci --prefix adapters --ignore-scripts
-cp examples/runner.yaml runner.yaml
-```
+Linux, Python 3.12+ and Node.js 22+ are required; the guide uses Python 3.13.
+Agents execute as the runner's OS user. Different execution accounts need
+separate instances, state directories, sockets and listener ports. Provider
+authentication must be available to the service, not only the interactive shell.
 
-The adapter manifest overrides Zod to 4.6.6 to address
-GHSA-mrhx-c7xc-m3w5 while retaining the tested Claude adapter 0.87.0.
-Keep this override until an adapter upgrade includes a patched Zod dependency;
-do not use `npm audit fix --force` to upgrade adapters without compatibility checks.
-
-Edit `runner.yaml` with absolute discovery roots, state/socket paths, adapter
-commands, the host's Tailscale IPv4 address, and your HiveMake origin. Give the
-host a readable `display_name`; when omitted it defaults to its hostname.
-
-Obtain an owner runner API key from your HiveMake installation. Store it in a
-private service environment file (`chmod 600`), outside the repository:
-
-```dotenv
-HIVEMAKE_OWNER_API_KEY=REPLACE_WITH_OWNER_KEY
-```
-
-Use `deploy/hivemake-runner.service` as a systemd template. Adjust `User`, `Group`,
-`HOME`, `PATH`, installation paths, and `EnvironmentFile` for your host. The
-service must use the account with the intended provider subscription logins.
-Systemd does not source interactive shell startup files.
-
-For a manual launch with the key already exported:
-
-```bash
-python -m runner.daemon --config /absolute/path/to/runner.yaml
-```
-
-For a systemd installation:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now hivemake-runner
-```
-
-The state directory stores `identity.json` (a generated UUID) and `runs.sqlite3`.
-Preserve it across upgrades and reinstalls to retain the runner identity and
-results. Renaming the display name does not change the ID. Do not clone a state
-directory onto another live host: independent hosts need independent IDs.
-Corrupt identity files cause startup failure rather than silent re-registration.
+The alternative `deploy/hivemake-runner.service` template is a **system unit**;
+the installation guide instead creates a **user unit** with lingering enabled.
+Choose one deployment method for an instance. Preserve its `identity.json` and
+`runs.sqlite3` across upgrades, and never clone its identity to another instance.
 
 ## Registration and availability
 
