@@ -31,6 +31,11 @@ npm ci --prefix adapters --ignore-scripts
 cp examples/runner.yaml runner.yaml
 ```
 
+The adapter manifest overrides Zod to 4.6.6 to address
+GHSA-mrhx-c7xc-m3w5 while retaining the tested Claude adapter 0.87.0.
+Keep this override until an adapter upgrade includes a patched Zod dependency;
+do not use `npm audit fix --force` to upgrade adapters without compatibility checks.
+
 Edit `runner.yaml` with absolute discovery roots, state/socket paths, adapter
 commands, the host's Tailscale IPv4 address, and your HiveMake origin. Give the
 host a readable `display_name`; when omitted it defaults to its hostname.
