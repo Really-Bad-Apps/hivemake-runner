@@ -2,11 +2,16 @@
 
 Reusable Linux installation guide for humans and host-owning agents. Validated
 on Vulcan as `foo` on 2026-10-29. Run commands in Bash as the account that will
-execute agents. Only the lingering command below needs sudo.
+execute agents. Lingering and optional administrator journal access use sudo;
+missing OS prerequisites or network restrictions go through the host owner.
 Run each command in order and stop on any error. This is a runbook, not an
 unattended script; resolve placeholders and inspect existing installations first.
 
-Validated runner code: `551d4fd95e7525d951c4eee3a5a055aecfc6a7ec`.
+Install revision: `e5290ba6202f9216bfa8a202c7c91b6008c67498`.
+Its runner code and dependency locks are unchanged from the validated revision
+`551d4fd95e7525d951c4eee3a5a055aecfc6a7ec`; it also includes both instruction
+profiles and their installation guide. Use this reviewed runbook throughout;
+the pinned checkout's older `docs/INSTALL.md` predates the single-endpoint rollout.
 Validated environment: Python 3.13, Node 24, Claude ACP 0.87.0, Codex ACP 2.1.1.
 Real production acceptance covered Claude executing `whoami` and `hostname`,
 with the caller's blocking MCP request returning the dispatcher-applied result.
@@ -58,11 +63,19 @@ provider, available port, and authority to install. Follow that host's ownership
 rules. Do not change another project's code or silently take over its admin work.
 If guiding a human interactively, give one command at a time and wait for output.
 
+For Apollo, use a separately launched human-driven host-admin session. Confirm
+Apollo's actual execution account, workspace and existing services; do not copy
+Vulcan's `foo`, port or profile scope as facts about Apollo. This guide does not
+authorize changing Apollo's application stack, dispatcher or other agents.
+If the installation session is itself runner-managed, do not change or restart
+its own runner from that session.
+
 Read-only checks:
 
 ```bash
 whoami
 hostname
+test "$(id -u)" -ne 0 || { echo 'Use the intended non-root execution account'; exit 1; }
 command -v git curl node npm claude codex
 node --version
 tailscale ip -4
@@ -91,7 +104,7 @@ export HM_RUNNER_DISPLAY='REPLACE_WITH_HOST — USER'
 export HM_RUNNER_IP='REPLACE_WITH_TAILSCALE_IPV4'
 export HM_RUNNER_PORT='7185'
 export HM_RUNNER_ORIGIN='https://api.hivemake.ai'
-export HM_RUNNER_REV='551d4fd95e7525d951c4eee3a5a055aecfc6a7ec'
+export HM_RUNNER_REV='e5290ba6202f9216bfa8a202c7c91b6008c67498'
 ```
 
 Inspect the selected port before continuing:
@@ -152,6 +165,7 @@ inspect and merge it deliberately instead.
 
 ```bash
 "$HM_RUNNER_ROOT/.venv/bin/python" <<'PY'
+import ipaddress
 import os
 import re
 from pathlib import Path
@@ -167,6 +181,13 @@ harness = env['HM_RUNNER_HARNESS']
 assert workspace.is_absolute() and workspace.is_dir() and not workspace.is_symlink()
 assert re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', agent_id)
 assert harness in ('claude', 'codex')
+for path in (root, config_dir, state):
+    assert path.is_absolute(), 'Installation paths must be absolute'
+assert ipaddress.ip_address(env['HM_RUNNER_IP']) in ipaddress.ip_network('100.64.0.0/10')
+assert 1024 <= int(env['HM_RUNNER_PORT']) <= 65535
+assert env['HM_RUNNER_DISPLAY'] != 'REPLACE_WITH_HOST — USER'
+assert 1 <= len(env['HM_RUNNER_AGENT_NAME'].strip()) <= 128
+assert 1 <= len(env['HM_RUNNER_DISPLAY'].strip()) <= 200
 marker = workspace / 'agent.yaml'
 config_path = config_dir / 'runner.yaml'
 assert not marker.exists() and not config_path.exists(), 'Inspect existing files first'
@@ -212,6 +233,48 @@ owner and follow [the profile installation guide](INSTRUCTION_PROFILES.md).
 For a fresh installation, add its mapping and marker reference before first
 startup. On an existing runner, load the mapping before publishing a new marker
 reference. Profiles are behavioral instructions, not an enforced sandbox.
+For a production admin agent, explicitly choose and review the scope before
+enabling autonomy: `ticket-read-only` cannot deploy; `ticket-admin` needs a
+host-specific completed copy. Leaving out a profile adds no runner-specific
+restrictions. Do not treat installing the template as approving its placeholders.
+
+### Validate configuration before starting
+
+After any profile edits, run this read-only configuration/discovery inspection.
+It does not start the daemon, an adapter, a model or a test ticket. It uses the
+installed code from its checkout, disables bytecode writes, and requires the
+intended workspace to be ready without discovery errors. Review all rows: any
+additional discovered agent must be intentional before binding it.
+
+```bash
+(
+  cd "$HM_RUNNER_ROOT" || exit 1
+  PYTHONDONTWRITEBYTECODE=1 "$HM_RUNNER_ROOT/.venv/bin/python" <<'PY'
+import os
+from pathlib import Path
+from runner.config import Config
+from runner.discovery import discover
+
+config = Config.load(Path(os.environ['HM_RUNNER_CONFIG']) / 'runner.yaml')
+_, inventory = discover(config.roots, config.commands, config.instruction_profiles)
+for row in inventory['agents']:
+    print(row['id'], row['workspace'], row['ready'], row['unavailable_reason'])
+if inventory['errors']:
+    raise SystemExit(f"Fix discovery errors before starting: {inventory['errors']}")
+matches = [row for row in inventory['agents']
+           if row['id'] == os.environ['HM_RUNNER_AGENT_ID']]
+if len(matches) != 1 or not matches[0]['ready']:
+    raise SystemExit('Intended agent must be discovered and ready before starting')
+if matches[0]['workspace'] != str(Path(os.environ['HM_RUNNER_WORKSPACE']).resolve()):
+    raise SystemExit('Discovered workspace differs from the intended workspace')
+print('Configuration and discovery are valid; no agent was launched.')
+PY
+)
+```
+
+This validates schema, executable availability and referenced profile files,
+not provider login, MCP access, network restrictions or template substitution.
+Review customized profiles for remaining `{{...}}` markers separately.
 
 ## 4. Give the service its credentials
 
@@ -255,14 +318,17 @@ else
 fi
 ```
 
-If this is your intended authentication method, append the token **once**:
+If this is your intended authentication method, append the token **once**, with
+shell tracing disabled. Confirm `runner.env` is the private file just created:
 
 ```bash
 (
   set -eu
   test -n "${CLAUDE_CODE_OAUTH_TOKEN:-}"
-  printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" >> "$HM_RUNNER_CONFIG/runner.env"
+  test -f "$HM_RUNNER_CONFIG/runner.env"
+  test ! -L "$HM_RUNNER_CONFIG/runner.env"
   chmod 600 "$HM_RUNNER_CONFIG/runner.env"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN" >> "$HM_RUNNER_CONFIG/runner.env"
 )
 ```
 
@@ -287,15 +353,18 @@ verify Codex before calling that installation accepted.
 
 The runner does not copy another user's MCP setup into this workspace. Preserve
 the existing agent-specific bearer key and other tools. For a Claude project,
-the relevant `.mcp.json` entry should use one of these transports:
+the relevant `.mcp.json` entry should use this standard HTTP endpoint:
 
 | Endpoint | Intended behavior |
 | --- | --- |
-| `https://mcp.hivemake.ai/mcp` | Existing immediate-return/polling compatibility |
-| `https://mcp.hivemake.ai/blocking/mcp` | Wait for autonomous recipients to respond |
+| `https://mcp.hivemake.ai/mcp` | Wait for autonomous recipients; return promptly for manual recipients |
 
-For the blocking rollout, update **only** this agent's HiveMake entry to the
-second URL, keeping `type: "http"` and its Authorization header. Make a backup
+MCP63 enabled this behavior on the standard route. It depends on the recipient's
+autonomous flag, not the caller's. Do not configure new installations with
+`/blocking/mcp`: that compatibility route is scheduled for retirement on
+2026-11-13 (Bragi ticket `e5e58b9a-d226-45a3-8fdc-a0bd38fa592b`).
+If migrating an existing entry, update **only** its HiveMake URL to `/mcp`,
+keeping `type: "http"` and its Authorization header. Make a backup
 with mode 600 first; the backup contains the same secret. Do not use SSE or an
 `/sse` URL. Do not print the whole configuration to chat. For Codex, configure
 the equivalent HTTP MCP server through that harness's supported configuration;
@@ -397,7 +466,7 @@ A minimal first acceptance request is:
 
 > May I send one ticket to this server agent asking it to run only `whoami` and
 > `hostname`, return the output and resolve it, with no configuration changes?
-> I will submit through the blocking MCP endpoint and verify it waits for the
+> I will submit through `https://mcp.hivemake.ai/mcp` and verify it waits for the
 > dispatcher-applied result.
 
 After consent, submit exactly that test. Record the ticket ID, runner execution
