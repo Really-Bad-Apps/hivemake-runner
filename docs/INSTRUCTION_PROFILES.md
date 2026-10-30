@@ -60,6 +60,29 @@ of converting every prohibited request into `needs_human`.
 
 ## Rollout order for an existing runner
 
+### Deployment drains and escalation
+
+The admin profile includes the named service's existing, host-approved drain
+recipe in deployment authority, including its in-container CLI and passive
+status checks. These steps do not need duplicate entries in the maintenance
+whitelist. Require the documented command, target, timeout, exit status and
+drained/idle state; failure or ambiguity stops rotation and returns `needs_human`.
+This grants no arbitrary exec, database-shell, queue-purge or shared Redis
+mutation permission. PostgreSQL migration execution still requires rejection.
+
+The dispatcher must turn `needs_human` into a formal escalation with human
+notifications, and observe human approval to allow another attempt within the
+installed profile. Deploy the matching API/dispatcher fix (core 0.50.1 or later);
+older dispatchers leave notes and holds instead. A profile update alone cannot
+repair that server behavior.
+
+Runner self-upgrade currently preserves installed profiles; it does not deliver
+this text. Existing hosts need an owner-controlled, human-driven profile merge
+using the procedure below. Preserve host-specific scope and restrictions. A
+runner binary upgrade alone must not be reported as a completed policy rollout.
+
+### Installation procedure
+
 Use a **separate human-driven session**, not the unattended session whose limits
 you are changing. Confirm the installation's OS user and unit type. The example
 paths below describe foo's user service; adapt them deliberately for each host.

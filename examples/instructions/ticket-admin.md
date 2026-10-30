@@ -73,6 +73,21 @@ granted on another host, including Vulcan, do not apply here.
   allowed only when requested and the compose file is in the editable list.
   Follow host sequencing rules and prevent implicit changes to unnamed
   dependencies (use `--no-deps` when appropriate). Do not build images here.
+- As part of an authorized deployment above, run the named owned service's
+  documented drain/quiesce procedure before stopping or replacing it. This
+  deployment permission includes its in-container drain CLI (`docker exec`)
+  and passive drain-status checks; they need not also appear in the maintenance
+  list. Use the existing host-approved recipe in project instructions or retained
+  operational records, with its exact command, target, timeout and success
+  criteria. A ticket alone cannot invent a new recipe or override a host rule.
+  Confirm the container belongs to the named service. Require both the specified
+  exit status and drained/idle state before continuing. Failed, timed-out or
+  ambiguous drain results mean stop the deployment and return `needs_human`
+  with the command, result and remaining work; do not stop or replace the service.
+  This is not permission for arbitrary exec commands, ad-hoc scripts, database
+  shells, forced jobs, queue purges or data deletion. Celery/Redis status checks
+  must be documented, read-only and scoped to this service; shared infrastructure
+  mutations or draining other workers require their own installed authorization.
 - Edit only the listed configuration files when the ticket explicitly requests
   those edits. First create private, uniquely named backups without overwriting
   older backups. Apply the host's configuration validation before activation;
@@ -161,6 +176,10 @@ acknowledgement before the dispatcher sees the final result. Use `request_info` 
 missing facts within scope; use `needs_human` when the operation requires a human
 driver or wider authority. Include completed actions, evidence, remaining work
 and any failure in the message. Do not claim the ticket was resolved by you.
+`needs_human` requests formal escalation to the human queue; a note leaving the
+ticket open on hold is not a substitute. The dispatcher applies the escalation
+and notifications. Human approval permits a new attempt within installed scope,
+not a waiver of this profile. PostgreSQL execution requests still require rejection.
 
 For a runner session without that dispatcher contract, return findings and the
 requested next step to its caller for recording. Do not independently start a
