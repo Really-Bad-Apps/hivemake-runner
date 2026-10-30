@@ -7,13 +7,15 @@ missing OS prerequisites or network restrictions go through the host owner.
 Run each command in order and stop on any error. This is a runbook, not an
 unattended script; resolve placeholders and inspect existing installations first.
 
-Install revision: `e5290ba6202f9216bfa8a202c7c91b6008c67498`.
-Its runner code and dependency locks are unchanged from the validated revision
-`551d4fd95e7525d951c4eee3a5a055aecfc6a7ec`; it also includes both instruction
-profiles and their installation guide. Use this reviewed runbook throughout;
-the pinned checkout's older `docs/INSTALL.md` predates the single-endpoint rollout.
-Validated environment: Python 3.13, Node 24, Claude ACP 0.87.0, Codex ACP 2.1.1.
-Real production acceptance covered Claude executing `whoami` and `hostname`,
+Install revision: `6e52b4459fa0671cc0cb346c577e7510336cbc23`.
+Includes hostname-labelled Loki logging and both worker instruction templates.
+This logging release passed 83 offline runner tests on Python 3.12; real Loki
+shipping and host upgrades still need rollout verification. Use this reviewed
+runbook throughout; the pinned checkout's bundled install guide predates this
+release-pin update.
+Earlier production installation used Python 3.13, Node 24, Claude ACP 0.87.0 and
+Codex ACP 2.1.1; adapter versions are unchanged. Real production acceptance on
+the earlier runner code covered Claude executing `whoami` and `hostname`,
 with the caller's blocking MCP request returning the dispatcher-applied result.
 It did **not** prove the worker's outbound MCP connection or long-running jobs.
 
@@ -104,7 +106,7 @@ export HM_RUNNER_DISPLAY='REPLACE_WITH_HOST — USER'
 export HM_RUNNER_IP='REPLACE_WITH_TAILSCALE_IPV4'
 export HM_RUNNER_PORT='7185'
 export HM_RUNNER_ORIGIN='https://api.hivemake.ai'
-export HM_RUNNER_REV='e5290ba6202f9216bfa8a202c7c91b6008c67498'
+export HM_RUNNER_REV='6e52b4459fa0671cc0cb346c577e7510336cbc23'
 ```
 
 Inspect the selected port before continuing:
@@ -136,7 +138,11 @@ elsewhere. Never install runner packages into system Python.
 git clone https://github.com/Really-Bad-Apps/hivemake-runner.git "$HM_RUNNER_ROOT"
 git -C "$HM_RUNNER_ROOT" checkout --detach "$HM_RUNNER_REV"
 "$HOME/.local/bin/uv" venv --python 3.13 "$HM_RUNNER_ROOT/.venv"
-"$HOME/.local/bin/uv" pip install --python "$HM_RUNNER_ROOT/.venv/bin/python" -r "$HM_RUNNER_ROOT/requirements.txt"
+hm_dependency_options=()
+if [ -f "$HM_RUNNER_ROOT/git-overrides.txt" ]; then
+  hm_dependency_options=(--override "$HM_RUNNER_ROOT/git-overrides.txt")
+fi
+"$HOME/.local/bin/uv" pip install --python "$HM_RUNNER_ROOT/.venv/bin/python" "${hm_dependency_options[@]}" -r "$HM_RUNNER_ROOT/requirements.txt"
 npm ci --prefix "$HM_RUNNER_ROOT/adapters" --ignore-scripts
 ```
 
@@ -349,6 +355,32 @@ The Claude token step does not authenticate Codex. The real production
 acceptance behind this guide validated Claude only; separately authorize and
 verify Codex before calling that installation accepted.
 
+### Loki logging
+
+The pinned revision includes Loki support. The dependency commands in this
+guide use `git-overrides.txt` to pin its transitive Git dependency as well.
+
+Configure `DEBUG_LOCAL=false`, `LOG_LEVEL=INFO`, `LOKI_ENDPOINT`, `LOKI_USER`,
+`LOKI_PASSWORD` and `LOKI_CA_BUNDLE_PATH` in the existing private `runner.env`.
+Obtain the host's intended Loki credentials and host-readable CA path through
+its normal private configuration process. Do not paste secrets into chat,
+overwrite owner/provider credentials, duplicate existing keys, or copy a Docker
+container's certificate path without checking the host path. All four Loki
+settings are required; for public certificates use the system CA bundle.
+
+The application label automatically becomes `hivemake-runner-<hostname>`.
+No hostname substitution or application label setting is required. Logs include
+the OS user and run IDs, but exclude prompt/response content and adapter stderr.
+Loki credentials are not passed to agent subprocesses. See the repository
+[logging configuration](../README.md#logging) for the full environment example.
+
+Prepare this before first start, or use the idle-window upgrade procedure for
+an existing daemon. `DEBUG_LOCAL=true` (the default) means console-only logging.
+Missing Loki settings with `DEBUG_LOCAL=false` fail startup; an unreachable Loki
+at startup causes a visible console-only fallback until restart. Inspect ordinary
+startup records in Loki after rollout; do not send a synthetic test without
+specific consent. Journals remain available even when remote logging is enabled.
+
 ## 5. Check the project's MCP configuration
 
 The runner does not copy another user's MCP setup into this workspace. Preserve
@@ -484,10 +516,13 @@ tests. Keep the runner timeout and external proxy/client limits explicit.
 
 For HiveMake API/MCP failures, query Loki first through `loki-mcp`:
 `{application="hivemake-server"}` and `{application="hivemake-mcp"}`; narrow
-by ticket UUID and time. The **runner itself has no Loki integration** at this
-revision. It logs to stderr, normally captured by systemd, and intentionally
-discards adapter stderr. Error messages are reduced to error codes/types to
-avoid leaking provider credentials. This limits current diagnosis.
+by ticket UUID and time. For logging-enabled runners, query
+`{application="hivemake-runner-HOSTNAME"}` (replace HOSTNAME), then filter JSON
+`run_id` using the runner execution UUID from the ticket. Older revisions without
+`runner/logging_setup.py` have console logging only. The pinned release still
+requires the service environment above to enable Loki. Adapter stderr remains
+intentionally discarded, and error
+messages are reduced to codes/types to avoid leaking provider credentials.
 
 Start with:
 
@@ -562,7 +597,11 @@ fetch and select it, reinstall the pinned dependencies, then start and inspect:
 ```bash
 git -C "$HM_RUNNER_ROOT" fetch origin
 git -C "$HM_RUNNER_ROOT" checkout --detach "$HM_RUNNER_REV"
-"$HOME/.local/bin/uv" pip install --python "$HM_RUNNER_ROOT/.venv/bin/python" -r "$HM_RUNNER_ROOT/requirements.txt"
+hm_dependency_options=()
+if [ -f "$HM_RUNNER_ROOT/git-overrides.txt" ]; then
+  hm_dependency_options=(--override "$HM_RUNNER_ROOT/git-overrides.txt")
+fi
+"$HOME/.local/bin/uv" pip install --python "$HM_RUNNER_ROOT/.venv/bin/python" "${hm_dependency_options[@]}" -r "$HM_RUNNER_ROOT/requirements.txt"
 npm ci --prefix "$HM_RUNNER_ROOT/adapters" --ignore-scripts
 systemctl --user start hivemake-runner.service
 systemctl --user status hivemake-runner.service --no-pager --full
@@ -590,6 +629,8 @@ Return this information to the operator, **without secrets**:
   environment was explicitly supplied to systemd.
 - HiveMake agent binding, intended autonomy, and old-poller disposition.
 - MCP endpoint and whether actual worker tool access was tested.
+- Logging mode, hostname-derived application label and passive startup-log
+  visibility; no Loki passwords or private configuration contents.
 - Specifically authorized acceptance ticket IDs/results and outstanding limits.
 
 Do not report “fully tested” based on registration or adapter discovery alone.
