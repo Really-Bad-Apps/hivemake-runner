@@ -41,6 +41,23 @@ or test still requires Jason's express consent for that activity and host.
 It also follows the current dispatch contract: return the result for the
 dispatcher to apply, rather than directly mutating tickets through MCP tools.
 
+## PostgreSQL migration requests
+
+Both worker profiles require `outcome: reject` for any ticket requesting
+PostgreSQL migration execution, including a migration bundled into deployment.
+Reject before operational changes; do not use a human-driver hold or perform a
+partial deployment. The rejection must direct the creator to Athena
+(`athena-server-admin-agent`) for Athena-hosted databases, or to the actual
+database host owner otherwise. If the host is unknown, reject and tell the
+creator to establish ownership before routing; do not assume every DB is on
+Athena. SQL review and passive evidence inspection remain subject
+to the normal read-only rules. The dispatcher applies the rejection.
+
+Merge this rule into existing host-customized profiles; updating this repository
+does not update installed copies. Preserve each host's scope and permissions.
+The shared dispatcher prompt must also preserve explicit rejection rules instead
+of converting every prohibited request into `needs_human`.
+
 ## Rollout order for an existing runner
 
 Use a **separate human-driven session**, not the unattended session whose limits
