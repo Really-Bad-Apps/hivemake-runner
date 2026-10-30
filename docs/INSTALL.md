@@ -8,9 +8,11 @@ Run each command in order and stop on any error. This is a runbook, not an
 unattended script; resolve placeholders and inspect existing installations first.
 
 Install revision: `6ae5d1bd5693f176558af6dbfb2c2aa49450e330`.
-Includes hostname-labelled Loki logging and both worker instruction templates.
-This logging release passed 83 offline runner tests on Python 3.12; real Loki
-shipping and host upgrades still need rollout verification. Use this reviewed
+Includes hostname-labelled Loki logging, both worker instruction templates and
+ticket-authorized self-upgrades. The reviewed implementation passed 110 offline
+tests and lint. Setup verification passed on Zeus, Apollo and Vulcan on
+2026-10-30; the actual upgrade/restart handoff remains untested. Bragi still
+needs its own setup verification. Use this reviewed
 runbook throughout; the pinned checkout's bundled install guide predates this
 release-pin update.
 Earlier production installation used Python 3.13, Node 24, Claude ACP 0.87.0 and
