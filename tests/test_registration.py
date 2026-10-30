@@ -126,8 +126,14 @@ async def test_owner_key_is_not_in_agent_environment(manager, monkeypatch):
         return await original(*args, **kwargs)
 
     monkeypatch.setenv("HIVEMAKE_OWNER_API_KEY", "hm_owner_do_not_inherit")
+    monkeypatch.setenv("LOKI_PASSWORD", "loki_do_not_inherit")
+    monkeypatch.setenv("LOKI_USER", "loki_user")
+    monkeypatch.setenv("LOKI_ENDPOINT", "https://logs.example.test/loki/api/v1/push")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "provider_must_inherit")
     monkeypatch.setattr(acp_session.asyncio, "create_subprocess_exec", capture)
     sid = manager.new_session("demo")["id"]
     result = await finished(manager, manager.submit(sid, "hello")["id"])
     assert result["status"] == "completed"
     assert observed and "HIVEMAKE_OWNER_API_KEY" not in observed[0]
+    assert not any(key.startswith("LOKI_") for key in observed[0])
+    assert observed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "provider_must_inherit"

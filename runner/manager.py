@@ -175,6 +175,10 @@ class Manager:
         s["active_run"] = run_id
         self.runs[run_id] = run
         self.tasks[run_id] = asyncio.create_task(self._execute(s, run))
+        log.info("run_started", extra={
+            "run_id": run_id, "session_id": session_id, "agent_id": agent.id,
+            "harness": agent.harness,
+        })
         return dict(run)
 
     async def dispatch(self, execution_id, agent_id, prompt):
@@ -300,7 +304,11 @@ class Manager:
         if session.get("auto_close"):
             await self.close_session(session["id"])
         self.tasks.pop(run["id"], None)
-        log.info("run_finished run_id=%s status=%s", run["id"], run["status"])
+        log.info("run_finished run_id=%s status=%s", run["id"], run["status"], extra={
+            "run_id": run["id"], "session_id": run["session_id"],
+            "agent_id": run["agent_id"], "status": run["status"],
+            "error_code": run["error"], "error_type": run.get("error_type"),
+        })
 
     def get_run(self, run_id):
         if run_id in self.pending_results:

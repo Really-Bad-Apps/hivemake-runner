@@ -52,7 +52,8 @@ class ACPSession:
         self.process = await asyncio.create_subprocess_exec(
             *self.command,
             cwd=self.agent.workspace,
-            env={k: v for k, v in os.environ.items() if k != "HIVEMAKE_OWNER_API_KEY"},
+            env={k: v for k, v in os.environ.items()
+                 if k != "HIVEMAKE_OWNER_API_KEY" and not k.startswith("LOKI_")},
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

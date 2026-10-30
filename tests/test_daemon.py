@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sys
 
 import httpx
@@ -40,6 +41,8 @@ async def test_process_lock_signal_cleanup_and_restart(config, tmp_path):
             "runner.daemon",
             "--config",
             str(config_path),
+            # Never inherit a host's production Loki mode into this fixture.
+            env={**os.environ, "DEBUG_LOCAL": "true"},
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

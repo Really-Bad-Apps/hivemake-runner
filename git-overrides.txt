@@ -1,0 +1,2 @@
+# Keep the logging library's transitive Git dependency reproducible.
+python-logging-loki @ git+https://github.com/waylayio/python-logging-loki.git@2b34c1ee2be8fd220191a184a4929af646df52ae

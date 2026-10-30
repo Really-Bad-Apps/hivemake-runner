@@ -33,6 +33,60 @@ the installation guide instead creates a **user unit** with lingering enabled.
 Choose one deployment method for an instance. Preserve its `identity.json` and
 `runs.sqlite3` across upgrades, and never clone its identity to another instance.
 
+## Logging
+
+The daemon uses `byteforge-loki-logging` with the automatic Loki label
+`application="hivemake-runner-<hostname>"`, using the system's `socket.gethostname()`.
+For example: `hivemake-runner-vulcan`, `hivemake-runner-apollo`,
+`hivemake-runner-zeus`. No per-host application-name setting is needed.
+JSON records include `hostname` and the effective OS account's `os_user`;
+multiple user runners on one host share the application label. Run lifecycle
+events include `run_id`, `session_id`, `agent_id`, and completion status/error
+metadata. `runner_ready` includes `runner_id`.
+
+Local console mode remains the default (`DEBUG_LOCAL=true`) so upgrading an
+existing runner does not require credentials before it can start. To enable
+Loki, configure the service's private environment file:
+
+```dotenv
+DEBUG_LOCAL=false
+LOG_LEVEL=INFO
+LOKI_ENDPOINT=https://YOUR_LOKI_HOST/loki/api/v1/push
+LOKI_USER=YOUR_LOKI_USER
+LOKI_PASSWORD=YOUR_LOKI_PASSWORD
+LOKI_CA_BUNDLE_PATH=/absolute/path/to/ca-bundle.pem
+```
+
+All four `LOKI_*` settings are required. Use a CA file readable by the service
+user (the system trust bundle for public certificates); never disable TLS
+verification to bypass configuration problems. Do not copy a container's CA
+path to the host without checking it. Keep `runner.env` mode 600 and credentials
+out of Git and chat. Follow [installation and upgrades](docs/INSTALL.md) and
+coordinate an idle window before restarting an existing runner.
+
+Loki mode retains JSON stderr output for systemd's journal. Missing configuration
+fails startup; an unreachable Loki endpoint at startup produces a warning and
+falls back to console-only logging. That fallback stays local until a restart.
+Shutdown attempts a bounded queue flush. Shipping is best-effort, not a durable
+audit trail: inspect the journal for shipping failures.
+
+Only runner-owned loggers ship remotely. Prompts, responses, raw ACP events,
+adapter stderr and third-party protocol logs are not sent to Loki. Owner runner
+credentials and `LOKI_*` variables are excluded from child-agent environments;
+provider authentication still reaches the adapter.
+
+Example read-only Loki queries:
+
+```logql
+{application="hivemake-runner-apollo"}
+{application=~"hivemake-runner-.+"} | json | os_user="foo"
+{application="hivemake-runner-vulcan"} | json | run_id="EXECUTION_UUID"
+```
+
+After an authorized rollout, inspect the ordinary `runner_logging_configured`
+and `runner_ready` records; a synthetic test ticket is not necessary to inspect
+startup logging. New production tests still need specific consent.
+
 ## Registration and availability
 
 The daemon registers immediately after its listener starts, then every 30 seconds
@@ -214,10 +268,15 @@ configuration out of Git.
 
 ```bash
 source bin/activate
-pip install -r requirements.txt -r dev-requirements.txt
+uv pip install --python bin/python --override git-overrides.txt -r requirements.txt -r dev-requirements.txt
 ruff check runner tests
 pytest
 ```
+
+Regenerate runtime pins with `uv pip compile requirements.in -c requirements.txt
+--override git-overrides.txt -o requirements.txt`; preserve existing pins unless
+deliberately updating a dependency. The override pins the logging library's
+transitive Git dependency to an immutable commit.
 
 Tests exercise real ACP subprocesses using a deterministic fake agent, including
 permissions, cancellation, process cleanup, recovery, registration and identity.

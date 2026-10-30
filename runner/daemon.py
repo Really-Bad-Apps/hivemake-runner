@@ -11,8 +11,10 @@ from contextlib import suppress
 from pathlib import Path
 
 from aiohttp import web
+from byteforge_loki_logging import flush_logging
 
 from .config import Config
+from .logging_setup import setup_logging
 from .manager import Manager, RunnerError
 from .registration import OWNER_KEY_ENV, heartbeat, identity
 from .store import Store
@@ -162,6 +164,7 @@ async def serve(config):
                 runner_id,
                 display_name,
                 len(manager.agents),
+                extra={"runner_id": runner_id, "agent_count": len(manager.agents)},
             )
             discovery_task = asyncio.create_task(manager.periodic_discovery())
             if config.hivemake_url:
@@ -182,12 +185,21 @@ async def serve(config):
             config.socket.unlink(missing_ok=True)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="HiveMake Runner host daemon")
     parser.add_argument("--config", required=True, type=Path)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    asyncio.run(serve(Config.load(args.config)))
+    setup_logging()
+    try:
+        asyncio.run(serve(Config.load(args.config)))
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "runner_failed", extra={"error_type": type(exc).__name__},
+        )
+        raise
+    finally:
+        logging.getLogger(__name__).info("runner_stopped")
+        flush_logging(timeout=5.0)
 
 
 if __name__ == "__main__":
