@@ -634,3 +634,12 @@ Return this information to the operator, **without secrets**:
 - Specifically authorized acceptance ticket IDs/results and outstanding limits.
 
 Do not report “fully tested” based on registration or adapter discovery alone.
+
+## Optional unattended runner upgrades
+
+Install the [safe self-upgrade workflow](SELF_UPGRADE.md) and merge the admin
+profile's upgrade exception if this account's admin agent should handle runner
+upgrade tickets. This requires one-time owner setup; existing installations
+without it need a separate admin session for that bootstrap. Subsequent scoped
+upgrades use an independent systemd job and preserve the ticket until restart
+verification, without requiring a new human approval for already-authorized work.

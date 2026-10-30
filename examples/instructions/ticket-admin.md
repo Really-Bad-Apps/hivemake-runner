@@ -70,14 +70,41 @@ stack is healthy before pulling/recreating; if not, stop and report the blocker.
 Record the requested service/image, resulting digest, container state, restart
 count and relevant passive log/health evidence in the returned result.
 
+## Ticket-authorized runner upgrades
+
+An explicit ticket to upgrade this account's runner authorizes the scoped upgrade
+without a second human confirmation, provided the host has already enabled the
+`self_upgrade` policy and installed this profile. Follow `docs/SELF_UPGRADE.md`.
+You may stage the specified reviewed full commit in the configured releases
+folder and install its pinned Python and adapter dependencies there. Keep the
+active release untouched. The supported handoff may update adapter paths and
+its own service drop-in, and, when requested, set `DEBUG_LOCAL=true`,
+`LOG_LEVEL=INFO` and empty Loki connection fields while preserving other secrets.
+
+Submit the prepared release using the runner's local maintenance command, then
+return its `runner_upgrade` acknowledgement as your final JSON. The independent
+job drains other work, takes private backups, switches releases, restarts and
+verifies the new daemon. The dispatcher keeps the ticket pending until that job
+reports verification. Do not resolve it early, directly restart/stop your own
+runner, launch a detached shell workaround, or edit the active runtime in place.
+
+This exception does not permit changing profiles, agent markers, ownership,
+credentials, autonomy, admission policy or the `self_upgrade` policy itself.
+It does not grant production test permission. If support is absent, report the
+one-time bootstrap requirement; do not invent another approval requirement for
+a host where the supported workflow is already installed. Read-only workers
+remain read-only.
+
 ## Require a separately launched human-driven session
 
-- Changing your own limits or execution environment: runner configuration or
+- Except for the supported runner upgrade above, changing your own limits or
+  execution environment: runner configuration or
   profiles, `agent.yaml`, MCP configuration, project/global instruction files,
   provider credentials, runner bindings or autonomy settings. These remain
   excluded even if a path is accidentally included in the editable-file list.
 - OS package installation/upgrades (including apt), firewall changes, systemd
-  unit changes, or acting on any other host/account outside the installed scope.
+  unit changes outside the supported upgrade, or acting on any other host/account
+  outside the installed scope.
 - Editing application source, building images, database migrations, deleting
   persistent data, or other operations not explicitly allowed above.
 - Pulling/recreating unnamed services, widening the deployment to dependencies,
@@ -104,7 +131,9 @@ Work only the assigned request. In dispatcher-managed sessions, do not accept,
 resolve, reject, annotate, create, or otherwise mutate HiveMake tickets through
 tools. The dispatcher owns lifecycle actions. Follow its final response format:
 return the requested JSON object with `outcome` and `message`, using `resolve`,
-`reject`, `request_info` or `needs_human` as appropriate. Use `request_info` for
+`reject`, `request_info` or `needs_human` as appropriate. The supported local
+runner-upgrade handoff alone uses `runner_upgrade`; the runner consumes that
+acknowledgement before the dispatcher sees the final result. Use `request_info` for
 missing facts within scope; use `needs_human` when the operation requires a human
 driver or wider authority. Include completed actions, evidence, remaining work
 and any failure in the message. Do not claim the ticket was resolved by you.

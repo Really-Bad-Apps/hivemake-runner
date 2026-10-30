@@ -8,11 +8,13 @@ import sqlite3
 from contextlib import suppress
 from uuid import uuid4
 
+from . import upgrade_control
 from .acp_session import ACPSession
 from .delivery_journal import recover_retired_deliveries
 from .discovery import discover
 from .instructions import InstructionError, load_instructions
 from .store import now
+from .upgrade_state import ACTIVE, finish_pending, read_plan, write_plan
 
 log = logging.getLogger(__name__)
 MAX_OUTPUT = 1024 * 1024
@@ -34,6 +36,15 @@ class Manager:
         self.inventory_changed = asyncio.Event()
         self.discovery_task = None
         self.stopping = False
+        self.config_path = None
+        self.boot_id = str(uuid4())
+        self.runner_id = None
+        self.registered = False
+        self.revision = None
+        plan = read_plan(config.state_dir)
+        if plan and plan.phase == "requested":
+            plan.phase, plan.error = "failed", "worker_interrupted_before_handoff"
+            write_plan(config.state_dir, plan)
         self.refresh()
         recover_retired_deliveries(self.store.db)
 
@@ -44,7 +55,7 @@ class Manager:
         return self.list_agents()
 
     async def refresh_async(self):
-        if self.stopping:
+        if self.stopping or upgrade_control.active(self):
             raise RunnerError("runner_stopping", 503)
         # Callers share one scan. Cancelling an HTTP request must not cancel
         # its worker or allow a second scan to overlap the still-running thread.
@@ -81,13 +92,15 @@ class Manager:
                 log.warning("runner_discovery_failed type=%s", type(exc).__name__)
 
     def list_agents(self):
+        maintaining = upgrade_control.active(self)
         return {
-            "agents": [{**a, "busy": a["id"] in self.busy} for a in self.discovery["agents"]],
+            "agents": [{**a, "busy": a["id"] in self.busy,
+                         "ready": a.get("ready", False) and not maintaining} for a in self.discovery["agents"]],
             "errors": self.discovery["errors"],
         }
 
     def new_session(self, agent_id):
-        if self.stopping:
+        if self.stopping or upgrade_control.active(self):
             raise RunnerError("runner_stopping", 503)
         if agent_id not in self.agents:
             raise RunnerError("agent_not_found", 404)
@@ -135,7 +148,7 @@ class Manager:
         }
 
     def submit(self, session_id, prompt, *, run_id=None):
-        if self.stopping:
+        if self.stopping or upgrade_control.active(self):
             raise RunnerError("runner_stopping", 503)
         if not self._flush_pending():
             raise RunnerError("storage_unavailable", 503)
@@ -258,6 +271,11 @@ class Manager:
                     self.config.startup_timeout,
                     session["instructions"],
                 )
+            if session.get("auto_close") and self.config.self_upgrade:
+                session["runtime"].maintenance_env = {
+                    "HIVEMAKE_RUN_ID": run["id"],
+                    "HIVEMAKE_RUNNER_SOCKET": str(self.config.socket),
+                }
             async with asyncio.timeout(self.config.run_timeout):
                 reason = await session["runtime"].prompt(run["prompt"])
             run["stop_reason"] = reason
@@ -296,7 +314,21 @@ class Manager:
                 await session["runtime"].close()
         # Keep an unpersisted result available in memory, and reject further
         # work while storage is unavailable instead of accumulating results.
-        run["finished_at"] = now()
+        try:
+            await upgrade_control.handoff(self, run)
+        except Exception:
+            # Never launch a restart when persistence or handoff failed.
+            run.update(finish_pending(run, None))
+            # A state I/O failure must not bypass runtime cleanup or retain
+            # the busy reservation forever. Admission remains closed if the
+            # durable plan could not be repaired.
+            with suppress(OSError, ValueError, TypeError):
+                plan = read_plan(self.config.state_dir)
+                if plan and plan.run_id == run["id"]:
+                    plan.phase, plan.error = "failed", "handoff_failed"
+                    write_plan(self.config.state_dir, plan)
+        if not run.get("upgrade_pending"):
+            run["finished_at"] = now()
         self._persist(run)
         self.busy.pop(session["agent"].id, None)
         session["active_run"] = None
@@ -321,6 +353,11 @@ class Manager:
             raise RunnerError("storage_unavailable", 503) from None
         if run is None:
             raise RunnerError("run_not_found", 404)
+        if run.get("upgrade_pending"):
+            plan = read_plan(self.config.state_dir, run_id)
+            if plan is None or plan.run_id != run_id or plan.phase not in ACTIVE:
+                run = finish_pending(run, plan)
+                return {**run, "persistence_pending": not self._persist(run)}
         return run
 
     def cancel(self, run_id):

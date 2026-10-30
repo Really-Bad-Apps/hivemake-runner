@@ -31,7 +31,8 @@ class Store:
         # The daemon's process lock prevents concurrent writers during recovery.
         # Read one unfinished transcript at a time, never the full history.
         while row := self.db.execute(
-            "SELECT body FROM runs WHERE status IN ('running', 'cancelling') LIMIT 1"
+            "SELECT body FROM runs WHERE status IN ('running', 'cancelling') "
+            "AND COALESCE(json_extract(body, '$.upgrade_pending'), 0)=0 LIMIT 1"
         ).fetchone():
             run = json.loads(row[0])
             run.update(status="interrupted", finished_at=now(), error="runner_restarted")

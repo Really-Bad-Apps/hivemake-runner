@@ -70,6 +70,7 @@ async def heartbeat(config, manager, runner_id, display_name, key):
             manager.inventory_changed.clear()
             try:
                 status = await register_once(client, config, manager, runner_id, display_name, key)
+                manager.registered = status == 200
                 if status != 200:
                     logger.warning(
                         "runner_registration_failed runner_id=%s display_name=%s status=%d",
@@ -78,6 +79,7 @@ async def heartbeat(config, manager, runner_id, display_name, key):
                         status,
                     )
             except (aiohttp.ClientError, TimeoutError) as exc:
+                manager.registered = False
                 logger.warning(
                     "runner_registration_failed runner_id=%s display_name=%s type=%s",
                     runner_id,

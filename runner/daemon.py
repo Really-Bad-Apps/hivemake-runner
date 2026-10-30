@@ -6,18 +6,22 @@ import fcntl
 import logging
 import os
 import signal
+import socket
 import stat
 from contextlib import suppress
+from dataclasses import asdict
 from pathlib import Path
 
 from aiohttp import web
 from byteforge_loki_logging import flush_logging
 
+from . import upgrade_control
 from .config import Config
 from .logging_setup import setup_logging
 from .manager import Manager, RunnerError
 from .registration import OWNER_KEY_ENV, heartbeat, identity
 from .store import Store
+from .upgrade_state import UPGRADE_PROTOCOL
 
 
 @web.middleware
@@ -102,9 +106,28 @@ def create_control_app(manager):
     async def retired_terminal_reply(request: web.Request) -> web.Response:
         return web.json_response({"error": "terminal_replies_retired"}, status=410)
 
+    async def maintenance(request: web.Request) -> web.Response:
+        sock = request.transport.get_extra_info("socket")
+        if sock is None or sock.family != socket.AF_UNIX:
+            raise RunnerError("local_socket_required", 403)
+        if request.method == "POST":
+            plan = await upgrade_control.request_upgrade(manager, await request.json())
+            return web.json_response(asdict(plan), status=202)
+        return web.json_response({
+            "boot_id": manager.boot_id, "pid": os.getpid(),
+            "upgrade_protocol": UPGRADE_PROTOCOL,
+            "runner_id": manager.runner_id, "revision": manager.revision,
+            "registered": manager.registered or not manager.config.hivemake_url,
+            "idle": not manager.tasks and not manager.pending_results,
+            "debug_local": os.environ.get("DEBUG_LOCAL", "true").lower() == "true",
+            "agents": manager.discovery,
+        })
+
     app.add_routes(
         [
             web.get("/health", health),
+            web.get("/maintenance", maintenance),
+            web.post("/maintenance", maintenance),
             web.put("/attachments/{attachment_id}", retired_terminal_reply),
             web.get("/attachments/{attachment_id}", retired_terminal_reply),
             web.delete("/attachments/{attachment_id}", retired_terminal_reply),
@@ -124,7 +147,7 @@ def create_control_app(manager):
     return app
 
 
-async def serve(config):
+async def serve(config, config_path: Path | None = None):
     # Remove the registration credential before creating any ACP subprocesses.
     owner_key = os.environ.pop(OWNER_KEY_ENV, "")
     if config.hivemake_url and not owner_key.startswith("hm_owner_"):
@@ -146,8 +169,15 @@ async def serve(config):
         runner_id, display_name = identity(config.state_dir, config.display_name)
         registration_task = None
         discovery_task = None
+        upgrade_task = None
         store = Store(config.state_dir / "runs.sqlite3")
         manager = Manager(config, store)
+        manager.config_path = config_path
+        manager.runner_id = runner_id
+        if config.self_upgrade:
+            manager.revision = await upgrade_control.command([
+                "git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "HEAD",
+            ])
         server = web.AppRunner(create_control_app(manager), access_log=None)
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -167,13 +197,15 @@ async def serve(config):
                 extra={"runner_id": runner_id, "agent_count": len(manager.agents)},
             )
             discovery_task = asyncio.create_task(manager.periodic_discovery())
+            if config.self_upgrade:
+                upgrade_task = asyncio.create_task(upgrade_control.watch(manager))
             if config.hivemake_url:
                 registration_task = asyncio.create_task(
                     heartbeat(config, manager, runner_id, display_name, owner_key)
                 )
             await stop.wait()
         finally:
-            for task in (discovery_task, registration_task):
+            for task in (discovery_task, registration_task, upgrade_task):
                 if task:
                     task.cancel()
                     with suppress(asyncio.CancelledError):
@@ -191,7 +223,7 @@ def main() -> None:
     args = parser.parse_args()
     setup_logging()
     try:
-        asyncio.run(serve(Config.load(args.config)))
+        asyncio.run(serve(Config.load(args.config), args.config.resolve()))
     except Exception as exc:
         logging.getLogger(__name__).error(
             "runner_failed", extra={"error_type": type(exc).__name__},

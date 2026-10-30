@@ -130,3 +130,11 @@ agent reference while its old mapping/file still exists and wait for discovery;
 then restore old configuration/profile files and restart if the mapping changed.
 Preserve the runner's identity and state. Keep a mapping until no live marker
 references it; do not delete a shared profile still used by other projects.
+
+### Ticket-authorized runner maintenance
+
+The admin template includes a narrow self-upgrade exception when the host has
+installed the [safe upgrade workflow](SELF_UPGRADE.md). A ticket grants the
+requested operation within that installed policy; it does not require another
+human session for every upgrade. The read-only template grants no such exception.
+Existing hosts need a one-time profile/policy bootstrap before using the handoff.

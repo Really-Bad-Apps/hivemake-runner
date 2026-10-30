@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from .instructions import PROFILE_NAME
+from .upgrade_state import UpgradePolicy
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class Config:
     display_name: str | None = None
     instruction_profiles: dict[str, Path] = field(default_factory=dict)
     discovery_interval: float = 60
+    self_upgrade: UpgradePolicy | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -50,6 +52,7 @@ class Config:
             "hivemake_url",
             "display_name",
             "instruction_profiles",
+            "self_upgrade",
         }
         if set(data) - allowed:
             raise ValueError("Unknown runner configuration fields")
@@ -73,6 +76,8 @@ class Config:
             ):
                 raise ValueError("Each adapter command must be a nonempty argv list")
         options = {}
+        if "self_upgrade" in data:
+            options["self_upgrade"] = UpgradePolicy.parse(data["self_upgrade"])
         if data.get("codex_socket") is not None:
             logging.getLogger(__name__).warning(
                 "codex_socket is retired and ignored; remove it from runner configuration"

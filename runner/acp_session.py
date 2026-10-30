@@ -45,6 +45,7 @@ class ACPSession:
         self.stderr_task = None
         self.closed = False
         self._close_task = None
+        self.maintenance_env = {}
 
     async def start(self):
         # Inherit the host service user's login/config environment. Never copy it
@@ -52,8 +53,9 @@ class ACPSession:
         self.process = await asyncio.create_subprocess_exec(
             *self.command,
             cwd=self.agent.workspace,
-            env={k: v for k, v in os.environ.items()
-                 if k != "HIVEMAKE_OWNER_API_KEY" and not k.startswith("LOKI_")},
+            env={**{k: v for k, v in os.environ.items()
+                    if k not in {"HIVEMAKE_OWNER_API_KEY", "HIVEMAKE_RUN_ID", "HIVEMAKE_RUNNER_SOCKET"}
+                    and not k.startswith("LOKI_")}, **self.maintenance_env},
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
