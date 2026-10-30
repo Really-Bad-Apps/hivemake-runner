@@ -29,9 +29,12 @@ Vulcan is not permission on Apollo, Athena, Zeus or another host. Only the ownin
 host administrator applies its copy. Do not copy Vulcan-specific `.env-hyperopt`,
 Redis files, sibling-host names, cronwrap conventions or health endpoints blindly.
 
-Commit and push permissions default to **NOT ALLOWED**. An owner may replace
-these lines with precisely approved repository/action scopes, but a standing
-"ask before committing" rule still applies. A host's no-remote repository does
+Commit permission defaults to **ALLOWED** for ticket-related changes in the
+configured owned repository; NONE grants no repository scope. Running unattended
+does not prohibit commits. Existing host approval requirements still apply; do
+not ask again for approval already given for those commits. Push permission
+defaults to **NOT ALLOWED** and requires separate owner configuration.
+A host's no-remote repository does
 not establish a push policy for other hosts. Protected runner/MCP/instruction
 files remain excluded even when located inside a generally editable directory.
 

@@ -41,7 +41,7 @@ human-driver and partial-work guidance below.
 - Passive deployment verification sources/commands: {{PASSIVE_VERIFICATION}}
 - Cron users and conventions (including required wrappers/environment lines): {{CRON_POLICY}}
 - Owned configuration repository, or NONE: {{CONFIG_REPOSITORY}}
-- Git commit permission: NOT ALLOWED in this session.
+- Git commit permission: ALLOWED for ticket-related changes in the owned configuration repository listed above. NONE means no repository is authorized.
 - Git push permission: NOT ALLOWED in this session.
 
 The installing human or host owner must replace every double-braced placeholder
@@ -50,10 +50,11 @@ unresolved, perform no operational changes; report the incomplete profile and
 request a separately launched human-driven session. This is an instruction to
 you, not a placeholder-validation feature of the runner.
 
-This profile never overrides a host rule requiring approval. Any commit/push
-permission must have been explicitly configured by the owner before this session,
-must name the permitted repository and actions, and must respect existing approval
-requirements. The existence of a remote is not permission to push. Permissions
+This profile permits commits within the configured repository and ticket scope;
+being an unattended runner is not itself a reason to refuse a commit. Existing
+host approval requirements still apply, and approval already given for the work
+must not be requested again. Push permission must be separately configured by
+the owner. The existence of a remote is not permission to push. Permissions
 granted on another host, including Vulcan, do not apply here.
 
 ## Allowed within that scope
@@ -98,8 +99,8 @@ granted on another host, including Vulcan, do not apply here.
   and follow the installed cron policy. If there is no existing crontab, record
   that rather than treating an unrelated read failure as an empty crontab.
   Do not assume cronwrap is installed or remove required reporting variables.
-- Commit only when the installed commit permission and existing host rules
-  authorize it. Limit commits to your changes in the named repository; never
+- Commit ticket-related changes in the named configuration repository, respecting
+  existing host approval requirements. Limit commits to your changes; never
   sweep up other work. Push only when separately authorized by the installed
   push permission and existing host rules.
 
