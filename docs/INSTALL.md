@@ -63,10 +63,10 @@ provider, available port, and authority to install. Follow that host's ownership
 rules. Do not change another project's code or silently take over its admin work.
 If guiding a human interactively, give one command at a time and wait for output.
 
-For Apollo, use a separately launched human-driven host-admin session. Confirm
-Apollo's actual execution account, workspace and existing services; do not copy
-Vulcan's `foo`, port or profile scope as facts about Apollo. This guide does not
-authorize changing Apollo's application stack, dispatcher or other agents.
+Use a separately launched human-driven host-admin session. Confirm the target
+host's actual execution account, workspace and existing services; do not copy
+another host's account, port or profile scope. This guide does not authorize
+changing the target host's application stack, dispatcher or other agents.
 If the installation session is itself runner-managed, do not change or restart
 its own runner from that session.
 
