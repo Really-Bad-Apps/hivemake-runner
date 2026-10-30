@@ -7,7 +7,7 @@ missing OS prerequisites or network restrictions go through the host owner.
 Run each command in order and stop on any error. This is a runbook, not an
 unattended script; resolve placeholders and inspect existing installations first.
 
-Install revision: `6e52b4459fa0671cc0cb346c577e7510336cbc23`.
+Install revision: `6ae5d1bd5693f176558af6dbfb2c2aa49450e330`.
 Includes hostname-labelled Loki logging and both worker instruction templates.
 This logging release passed 83 offline runner tests on Python 3.12; real Loki
 shipping and host upgrades still need rollout verification. Use this reviewed
@@ -106,7 +106,7 @@ export HM_RUNNER_DISPLAY='REPLACE_WITH_HOST — USER'
 export HM_RUNNER_IP='REPLACE_WITH_TAILSCALE_IPV4'
 export HM_RUNNER_PORT='7185'
 export HM_RUNNER_ORIGIN='https://api.hivemake.ai'
-export HM_RUNNER_REV='6e52b4459fa0671cc0cb346c577e7510336cbc23'
+export HM_RUNNER_REV='6ae5d1bd5693f176558af6dbfb2c2aa49450e330'
 ```
 
 Inspect the selected port before continuing:
