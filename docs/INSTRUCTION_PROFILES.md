@@ -74,10 +74,18 @@ This grants no arbitrary exec, database-shell, queue-purge or shared Redis
 mutation permission. PostgreSQL migration execution still requires rejection.
 
 The dispatcher must turn `needs_human` into a formal escalation with human
-notifications, and observe human approval to allow another attempt within the
-installed profile. Deploy the matching API/dispatcher fix (core 0.50.1 or later);
-older dispatchers leave notes and holds instead. A profile update alone cannot
-repair that server behavior.
+notifications. The updated contract classifies needs_human as approval or
+human_session. Only the dedicated authenticated approval action releases an
+approval request and supplies a scoped VERIFIED HUMAN APPROVAL header. Ordinary
+replies do not grant permission. Session handoffs remain escalated and do not
+redispatch. Verified approval permits the exact requested operation on the
+installed host, even outside its unattended allowlist, subject to the admin
+profile's explicit non-overridable boundaries.
+
+Deploy the matching API/core/dispatcher and frontend implementation for ticket
+a8961dc7 before installing this profile. Older dispatchers cannot parse the
+classification and core 0.50.2 does not implement this approval contract. Do not
+roll out the template alone or claim a binary upgrade updates policy.
 
 Runner self-upgrade currently preserves installed profiles; it does not deliver
 this text. Existing hosts need an owner-controlled, human-driven profile merge
