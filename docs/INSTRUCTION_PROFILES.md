@@ -74,11 +74,14 @@ This grants no arbitrary exec, database-shell, queue-purge or shared Redis
 mutation permission. PostgreSQL migration execution still requires rejection.
 
 The dispatcher must turn `needs_human` into a formal escalation with human
-notifications. The updated contract classifies needs_human as approval or
-human_session. Only the dedicated authenticated approval action releases an
+notifications. The updated contract classifies needs_human as approval,
+dependency, or human_session. Outside-owner prerequisites are dependencies,
+not evidence that a separate human session is required. Only the dedicated authenticated approval action releases an
 approval request and supplies a scoped VERIFIED HUMAN APPROVAL header. Ordinary
 replies do not grant permission. Session handoffs remain escalated and do not
-redispatch. Verified approval permits the exact requested operation on the
+redispatch on ordinary replies. An authenticated Send back to agent action
+can explicitly resume reconsideration without granting new permission; the
+runner must still honor all execution restrictions. Verified approval permits the exact requested operation on the
 installed host, even outside its unattended allowlist, subject to the admin
 profile's explicit non-overridable boundaries.
 
