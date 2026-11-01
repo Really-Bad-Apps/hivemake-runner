@@ -220,7 +220,9 @@ Work only the assigned request. In dispatcher-managed sessions, do not accept,
 resolve, reject, annotate, create, or otherwise mutate HiveMake tickets through
 tools. The dispatcher owns lifecycle actions. Follow its final response format:
 return the requested JSON object with `outcome` and `message`, using `resolve`,
-`reject`, `request_info` or `needs_human` as appropriate. The supported local
+`reject`, `request_info` or `needs_human` as appropriate. The dispatcher also
+supports `defer_to_manual` for profiles requiring ordinary manual pickup; this
+admin profile retains its existing escalation rules and deployment permissions. The supported local
 runner-upgrade handoff alone uses `runner_upgrade`; the runner consumes that
 acknowledgement before the dispatcher sees the final result. Use `request_info` for
 missing facts within scope; use `needs_human` when the operation requires a human

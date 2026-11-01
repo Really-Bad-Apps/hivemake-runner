@@ -192,3 +192,18 @@ installed the [safe upgrade workflow](SELF_UPGRADE.md). A ticket grants the
 requested operation within that installed policy; it does not require another
 human session for every upgrade. The read-only template grants no such exception.
 Existing hosts need a one-time profile/policy bootstrap before using the handoff.
+
+## Selective autonomy through the read-only profile
+
+The read-only profile returns `defer_to_manual` for changes or uncertain scope.
+The backend records a durable manual hold and an ordinary reason note. It leaves
+new tickets open and unaccepted in the normal queue; there is no escalation or
+approval prompt. Notes, restarts and policy/autonomy changes do not release the
+hold. Humans work those tickets normally. Other tickets can still run.
+
+Install this profile only after migration 040 and the matching API/core/dispatcher
+release. The existing Autonomy switch must be enabled on the intended bound agent
+for automatic inspection to run; false continues to mean entirely manual. Do not
+enable it as an incidental part of a software upgrade. Installed host copies
+require an explicit owner-controlled update. This remains policy enforcement,
+not a tool allowlist or sandbox. The admin profile's escalation behavior is unchanged.
